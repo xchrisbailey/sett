@@ -43,6 +43,20 @@ fn wiki_links_stay_verbatim() {
 }
 
 #[test]
+fn soft_line_breaks_are_kept() {
+    for source in [
+        "Paragraph right after headings.\nSoft-wrapped second line.\n",
+        "> We should not save files the user only opened. Saving on view\n> rewrites Markdown that agents wrote.\n>\n> — Priya\n",
+        "- An item that wraps\n  onto a second line.\n- Next item\n",
+        "1. Ordered item\n   continues here.\n",
+        "**09:12** started the sync\n**09:40** *found the bug\nin the lock*\n",
+        "A [link that\nwraps](notes.md) mid-text.\n",
+    ] {
+        assert_round_trips(source);
+    }
+}
+
+#[test]
 fn literal_brackets_that_are_not_wiki_links_stay_escaped() {
     for source in ["\\[\\[not a link\\]\\](notes.md)\n", "\\[\\[a\\*b\\]\\]\n"] {
         assert_round_trips(source);

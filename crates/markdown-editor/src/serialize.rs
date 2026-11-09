@@ -250,7 +250,13 @@ fn list_item(doc: &EditorDocument, item: BlockId, marker: &str) -> String {
 // would read as block syntax are escaped.
 
 pub(crate) fn inline_markdown(inline: &InlineText) -> String {
-    inline_markdown_with(inline, editor_source_options())
+    inline_markdown_with(inline, editor_source_options(), false)
+}
+
+/// FORK: [`inline_markdown`] for an inline copy. The inline paste turns each
+/// line into a block, so a soft line break is copied as the space it shows as.
+pub(crate) fn inline_copy_markdown(inline: &InlineText) -> String {
+    inline_markdown_with(inline, editor_source_options(), true)
 }
 
 /// FORK: [`inline_markdown`] for a table cell, where `|` must stay escaped.
@@ -261,13 +267,23 @@ pub(crate) fn table_cell_markdown(inline: &InlineText) -> String {
             table_cell: true,
             ..editor_source_options()
         },
+        false,
     )
 }
 
-fn inline_markdown_with(inline: &InlineText, options: MarkdownSourceOptions) -> String {
+fn inline_markdown_with(
+    inline: &InlineText,
+    options: MarkdownSourceOptions,
+    soft_breaks_as_spaces: bool,
+) -> String {
     let mut source = MarkdownSource::with_options(options);
     for (range, marks, atom) in inline.pieces() {
         match atom {
+            Some(InlineAtom::Custom(node))
+                if soft_breaks_as_spaces && node.name() == crate::import::SOFT_BREAK =>
+            {
+                source.push_marked(node.as_text(), marks)
+            }
             Some(InlineAtom::Custom(node)) => source.push_marked(&custom_markdown(node), marks),
             Some(InlineAtom::Image(image)) => {
                 let alt = image.alt.as_deref().unwrap_or_default();

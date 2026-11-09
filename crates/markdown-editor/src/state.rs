@@ -1924,7 +1924,9 @@ impl BlockEditorState {
                 // partial selection serializes as its own inline, so
                 // delimiters are always balanced at the cut edges.
                 if let Some(inline) = self.model.doc.inline(id) {
-                    return Some(super::serialize::inline_markdown(&inline.slice(lo..hi)));
+                    return Some(super::serialize::inline_copy_markdown(
+                        &inline.slice(lo..hi),
+                    ));
                 }
                 inline_only = false;
                 let text = self.model.doc.leaf_text(id)?;

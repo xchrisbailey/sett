@@ -21,7 +21,7 @@ pub(crate) fn parse_document(
     source: &str,
     extensions: Arc<MarkdownExtensions>,
 ) -> Result<EditorDocument, SharedString> {
-    let parsed = parse_markdown(source, extensions.clone())?;
+    let parsed = parse_markdown(source, with_soft_breaks(&extensions))?;
     let mut doc = EditorDocument::empty(extensions);
     let root = doc.root;
     // Drop the placeholder paragraph of the empty document.
@@ -311,6 +311,9 @@ fn import_inline_node(node: &InlineNode) -> InlineText {
         mark
     };
     if let Some(custom) = node.as_custom() {
+        if custom.name() == SOFT_BREAK_TEXT {
+            return soft_break_text(custom.as_text(), merged_marks());
+        }
         return InlineText::atom(InlineAtom::Custom(custom.clone()), merged_marks());
     }
     if let Some(image) = node.as_image() {
@@ -338,6 +341,54 @@ fn import_inline_node(node: &InlineNode) -> InlineText {
         }
         out.push(InlineText::plain(&text[lo..hi], mark));
     }
+    out
+}
+
+/// FORK: the inline atom a soft line break imports as. It shows as a space
+/// (the paragraph still reflows) and serializes as its original line ending,
+/// so hard-wrapped Markdown keeps its lines on save.
+pub(crate) const SOFT_BREAK: &str = "editor-soft-break";
+const SOFT_BREAK_TEXT: &str = "editor-soft-break-text";
+
+/// FORK: gpui-kit's parser folds soft line breaks into spaces before the
+/// importer sees them. A parse-only inline plugin claims every text node
+/// that holds a line ending first, and [`import_inline_node`] expands it into
+/// text runs and [`SOFT_BREAK`] atoms. It is not part of the document's
+/// extensions, so external pastes keep their one-block-per-line behaviour.
+pub(crate) fn with_soft_breaks(extensions: &MarkdownExtensions) -> Arc<MarkdownExtensions> {
+    use ::markdown::mdast::Node;
+    use gpui_kit::base::text::{MarkdownNode, MarkdownParseContext, MarkdownPlugin};
+
+    struct SoftBreakText;
+    impl MarkdownPlugin for SoftBreakText {
+        fn name(&self) -> &str {
+            SOFT_BREAK_TEXT
+        }
+        fn parse(&self, node: &Node, _cx: &MarkdownParseContext<'_>) -> Option<MarkdownNode> {
+            let Node::Text(text) = node else {
+                return None;
+            };
+            text.value
+                .contains(['\n', '\r'])
+                .then(|| MarkdownNode::new(SOFT_BREAK_TEXT, ()).text(text.value.clone()))
+        }
+    }
+    Arc::new(extensions.clone().plugin(SoftBreakText))
+}
+
+fn soft_break_text(text: &str, mark: TextMark) -> InlineText {
+    let mut out = InlineText::new();
+    let mut rest = text;
+    while let Some(at) = rest.find(['\n', '\r']) {
+        let ending = if rest[at..].starts_with("\r\n") { 2 } else { 1 };
+        out.push(InlineText::plain(&rest[..at], mark.clone()));
+        let node = gpui_kit::base::text::MarkdownNode::new(SOFT_BREAK, ())
+            .text(" ")
+            .markdown(rest[at..at + ending].to_string());
+        out.push(InlineText::atom(InlineAtom::Custom(node), mark.clone()));
+        rest = &rest[at + ending..];
+    }
+    out.push(InlineText::plain(rest, mark));
     out
 }
 

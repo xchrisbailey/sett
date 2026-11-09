@@ -582,3 +582,22 @@ fn code_content_is_not_unescaped() {
     let reloaded = model(&code.source());
     assert_eq!(only_text(&reloaded), content);
 }
+
+// FORK: soft line breaks survive the editor's own copy and paste.
+#[test]
+fn own_block_paste_keeps_soft_line_breaks() {
+    let mut editor = model("before");
+    editor.select_end().unwrap();
+    assert!(
+        editor
+            .paste_blocks_markdown("one\ntwo\n\n- three\n  four")
+            .unwrap()
+    );
+    assert_eq!(editor.source(), "beforeone\ntwo\n\n- three\n  four");
+}
+
+#[test]
+fn external_multi_line_paste_still_splits_lines_into_blocks() {
+    let mut editor = model("");
+    assert!(!editor.paste_blocks("one\ntwo").unwrap());
+}

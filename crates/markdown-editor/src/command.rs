@@ -1041,9 +1041,14 @@ impl BlockEditorModel {
         {
             return Ok(false);
         }
-        let Ok(parsed) =
-            gpui_kit::base::text::editor_host::parse_markdown(text, self.doc.extensions.clone())
-        else {
+        // FORK: the editor's own copy writes soft line breaks as line
+        // endings; read them back as soft breaks, not as one block per line.
+        let extensions = if own {
+            super::import::with_soft_breaks(&self.doc.extensions)
+        } else {
+            self.doc.extensions.clone()
+        };
+        let Ok(parsed) = gpui_kit::base::text::editor_host::parse_markdown(text, extensions) else {
             return Ok(false);
         };
         let mut defs = super::import::Defs::new();
