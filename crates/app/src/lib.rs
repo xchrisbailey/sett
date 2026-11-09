@@ -28,6 +28,7 @@ pub use shell::{
 pub fn init(cx: &mut gpui_kit::App) {
     markdown_editor::init(cx);
     board::init(cx);
+    notes::init(cx);
     shell::init(cx);
     task_view::init(cx);
 }

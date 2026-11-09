@@ -1,4 +1,5 @@
 use std::cmp::Reverse;
+use std::collections::HashMap;
 use std::io;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -9,15 +10,24 @@ use gpui_kit::component::{
     ActiveTheme as _, IconName, Sizable as _, WindowExt as _, h_flex, v_flex,
 };
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Context, ElementId, Entity, InteractiveElement as _,
-    IntoElement, ParentElement as _, Render, Role, SharedString, StatefulInteractiveElement as _,
-    Styled as _, Subscription, TestSupportExt as _, Window, div, prelude::FluentBuilder as _,
+    AnyElement, App, AppContext as _, Context, ElementId, Entity, FocusHandle,
+    InteractiveElement as _, IntoElement, KeyBinding, ParentElement as _, Render, Role,
+    SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, TestSupportExt as _,
+    Window, actions, div, prelude::FluentBuilder as _,
 };
 use sett_store::{ItemId, Note, Space};
 
 use crate::app_model::{AppModel, Selection};
 use crate::confirm_delete::{ITEM_CONSEQUENCE, confirm_delete};
 use crate::item_editor::{ItemEditor, ItemRef};
+
+actions!(sett, [OpenNote]);
+
+const ROW_CONTEXT: &str = "NoteRow";
+
+pub(crate) fn init(cx: &mut App) {
+    cx.bind_keys([KeyBinding::new("enter", OpenNote, Some(ROW_CONTEXT))]);
+}
 
 /// Which Notes a list shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,6 +47,8 @@ pub(crate) struct NotesView {
     /// Space-level Notes. Changing it closes the open Note.
     shown: Option<(Space, Option<String>)>,
     editor: Entity<ItemEditor>,
+    /// Lets Tab reach each row and Enter open it, by Note slug.
+    row_focus: HashMap<String, FocusHandle>,
     _observe: Subscription,
 }
 
@@ -54,6 +66,7 @@ impl NotesView {
             scope,
             shown: None,
             editor,
+            row_focus: HashMap::new(),
             _observe: observe,
         };
         view.sync(window, cx);
@@ -74,12 +87,28 @@ impl NotesView {
             (NotesScope::SelectedProject, Selection::Project(slug)) => Some((space, Some(slug))),
             (NotesScope::SelectedProject, _) => None,
         };
+        let slugs: Vec<String> = match &shown {
+            Some((_, project)) => model
+                .index()
+                .notes(project.as_deref())
+                .into_iter()
+                .map(|n| n.slug.clone())
+                .collect(),
+            None => Vec::new(),
+        };
         if shown != self.shown {
             self.shown = shown;
+            self.row_focus.clear();
             self.editor.update(cx, |editor, cx| {
                 editor.flush(window, cx);
                 editor.discard(cx);
             });
+        }
+        self.row_focus.retain(|slug, _| slugs.contains(slug));
+        for slug in slugs {
+            self.row_focus
+                .entry(slug)
+                .or_insert_with(|| cx.focus_handle().tab_stop(true));
         }
     }
 
@@ -155,7 +184,10 @@ impl NotesView {
         let theme = cx.theme();
         let (hover, accent) = (theme.muted, theme.accent);
         let title = SharedString::from(note.title.clone());
-        let (open_slug, menu_slug) = (note.slug.clone(), note.slug.clone());
+        let (open_slug, key_slug, menu_slug) =
+            (note.slug.clone(), note.slug.clone(), note.slug.clone());
+        let focus = self.row_focus.get(&note.slug).cloned();
+        let ring = theme.ring;
         let menu_title = note.title.clone();
         let this = cx.entity().downgrade();
         div()
@@ -170,6 +202,14 @@ impl NotesView {
             .truncate()
             .when(open, |row| row.bg(accent))
             .when(!open, |row| row.hover(move |style| style.bg(hover)))
+            .when_some(focus, |row, focus| row.track_focus(&focus))
+            .key_context(ROW_CONTEXT)
+            .border_1()
+            .border_color(gpui_kit::transparent_black())
+            .focus_visible(move |style| style.border_color(ring))
+            .on_action(cx.listener(move |this, _: &OpenNote, window, cx| {
+                this.open_note(&key_slug, window, cx)
+            }))
             .on_click(
                 cx.listener(move |this, _, window, cx| this.open_note(&open_slug, window, cx)),
             )

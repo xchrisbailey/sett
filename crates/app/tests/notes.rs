@@ -444,3 +444,26 @@ fn a_projects_notes_tab_lists_only_its_notes(cx: &mut TestAppContext) {
     assert!(notes.join("untitled.md").exists());
     assert!(!f.data_root.join("personal/notes/untitled.md").exists());
 }
+
+#[gpui_kit::test]
+fn note_rows_are_reachable_by_tab_and_open_with_enter(cx: &mut TestAppContext) {
+    let f = open_shell(cx);
+    with_note(cx, &f, "ideas", "---\ntitle: Ideas\n---\n");
+    with_note(cx, &f, "plan", "---\ntitle: Plan\n---\n");
+    let rows = listed(cx, &f);
+    let (first, second) = (rows[0].to_lowercase(), rows[1].to_lowercase());
+
+    open_note(cx, &f, &first);
+    cx.update_window(f.window, |_, window, cx| {
+        window.press("tab", cx);
+        window.within(format!("note-{second}")).press("enter", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    cx.update_window(f.window, |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(window.find("note-title").value(), Some(rows[1].as_str()));
+    })
+    .unwrap();
+}
