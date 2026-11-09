@@ -90,7 +90,8 @@ fn long_nested_source_is_shared_per_revision_not_per_selection() {
     editor.insert_text(" changed", EditOrigin::Typing).unwrap();
     let next = editor.source_snapshot();
     assert_ne!(next.revision(), first.revision());
-    assert!(next.text().ends_with("changed"));
+    // FORK: the source's final newline is kept after the edited last line.
+    assert!(next.text().ends_with("changed\n"));
     eprintln!(
         "nested source: {} input bytes, {} exported bytes; first {:?}, 500 shared snapshots {:?}",
         source.len(),

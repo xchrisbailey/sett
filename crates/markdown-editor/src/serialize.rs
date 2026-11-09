@@ -23,7 +23,9 @@ pub(crate) fn editor_source_options() -> MarkdownSourceOptions {
 }
 
 pub(crate) fn serialize(doc: &EditorDocument) -> String {
-    block(doc, doc.root)
+    let mut out = block(doc, doc.root);
+    out.push_str(doc.final_line_ending);
+    out
 }
 
 pub(crate) fn join_blocks(doc: &EditorDocument, ids: &[BlockId]) -> String {

@@ -61,7 +61,20 @@ pub(crate) fn parse_document(
     } else {
         line_ends.len()
     };
-    for _ in 0..ending_count.div_ceil(2) {
+    // FORK: a pair of line endings is a blank line, which restores as an
+    // empty paragraph (an editing boundary). An odd one out just terminates
+    // the last line; keep it as trivia rather than inventing a blank line,
+    // which would grow the file by one newline on every save.
+    if ending_count % 2 == 1 {
+        doc.final_line_ending = if line_ends.ends_with("\r\n") {
+            "\r\n"
+        } else if line_ends.ends_with('\n') {
+            "\n"
+        } else {
+            "\r"
+        };
+    }
+    for _ in 0..ending_count / 2 {
         let index = doc.children(root).len();
         doc.attach(
             root,

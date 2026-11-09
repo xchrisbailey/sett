@@ -50,6 +50,9 @@ pub(crate) struct EditorDocument {
     /// re-projects a top-level block only when its revision changes.
     pub(crate) block_revisions: HashMap<BlockId, u64>,
     edit_counter: u64,
+    /// FORK: the line ending that terminated the source's last line, written
+    /// back after the final block so a file keeps its final newline as is.
+    pub(crate) final_line_ending: &'static str,
 }
 
 impl EditorDocument {
@@ -83,6 +86,7 @@ impl EditorDocument {
             extensions,
             block_revisions: HashMap::new(),
             edit_counter: 0,
+            final_line_ending: "",
         };
         doc.refresh_order();
         doc
