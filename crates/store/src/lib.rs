@@ -7,9 +7,11 @@
 
 mod date;
 mod frontmatter;
+mod index;
 mod item;
 mod settings;
 mod slug;
+mod watch;
 
 use std::fs;
 use std::io;
@@ -19,8 +21,11 @@ use serde_yaml_ng::{Mapping, Value};
 
 pub use date::Date;
 use frontmatter::Document;
+pub use index::{Change, SpaceIndex, Update};
 pub use item::{JournalEntry, Note, Task};
 pub use settings::{EditorMode, Settings};
+pub use watch::Watcher;
+use watch::WriteLog;
 
 pub const INBOX_SLUG: &str = "inbox";
 const DEFAULT_COLUMNS: [&str; 3] = ["Todo", "Doing", "Done"];
@@ -98,12 +103,16 @@ impl Project {
 
 pub struct Store {
     root: PathBuf,
+    log: WriteLog,
 }
 
 impl Store {
     /// Opens the data root, running first-run setup if it doesn't exist yet.
     pub fn open(root: impl Into<PathBuf>) -> io::Result<Store> {
-        let store = Store { root: root.into() };
+        let store = Store {
+            root: root.into(),
+            log: WriteLog::default(),
+        };
         if !store.root.exists() {
             store.first_run()?;
         }
@@ -117,8 +126,8 @@ impl Store {
     fn first_run(&self) -> io::Result<()> {
         fs::create_dir_all(&self.root)?;
         for space in Space::ALL {
-            fs::create_dir_all(self.notes_dir(space, None))?;
-            fs::create_dir_all(self.journal_dir(space))?;
+            self.create_dirs(&self.notes_dir(space, None))?;
+            self.create_dirs(&self.journal_dir(space))?;
             let mut inbox = Project::from_doc(space, INBOX_SLUG, Document::default());
             inbox.name = "Inbox".to_string();
             inbox.icon = Some("inbox".to_string());
@@ -152,11 +161,43 @@ impl Store {
             .into_iter()
             .map(|(slug, doc)| Task::from_doc(space, project, &slug, doc))
             .collect();
-        tasks.sort_by(|a, b| {
-            let key = |t: &Task| t.order.unwrap_or(f64::INFINITY);
-            key(a).total_cmp(&key(b)).then_with(|| a.slug.cmp(&b.slug))
-        });
+        tasks.sort_by(task_order);
         tasks
+    }
+
+    /// The Project if its folder exists, using defaults for a missing or
+    /// broken `project.md`.
+    pub fn project(&self, space: Space, slug: &str) -> Option<Project> {
+        let dir = self.project_dir(space, slug);
+        if !slug::is_safe(slug) || !dir.is_dir() {
+            return None;
+        }
+        let doc = read_doc(&dir.join("project.md")).unwrap_or_default();
+        Some(Project::from_doc(space, slug, doc))
+    }
+
+    pub fn task(&self, space: Space, project: &str, slug: &str) -> Option<Task> {
+        if !slug::is_safe(project) || !slug::is_safe(slug) {
+            return None;
+        }
+        let path = self
+            .project_dir(space, project)
+            .join("tasks")
+            .join(md(slug));
+        Some(Task::from_doc(space, project, slug, read_doc(&path)?))
+    }
+
+    pub fn note(&self, space: Space, project: Option<&str>, slug: &str) -> Option<Note> {
+        if !project.is_none_or(slug::is_safe) || !slug::is_safe(slug) {
+            return None;
+        }
+        let path = self.notes_dir(space, project).join(md(slug));
+        Some(Note::from_doc(space, project, slug, read_doc(&path)?))
+    }
+
+    pub fn journal_entry(&self, space: Space, date: Date) -> Option<JournalEntry> {
+        let path = self.journal_dir(space).join(md(&date.to_string()));
+        Some(JournalEntry::from_doc(space, date, read_doc(&path)?))
     }
 
     /// Space-level Notes when `project` is `None`, otherwise that Project's.
@@ -258,7 +299,7 @@ impl Store {
         check_slug(&task.slug)?;
         let dir = self.project_dir(task.space, &task.project).join("tasks");
         let doc = task.to_doc();
-        write_doc(&dir.join(md(&task.slug)), &doc)?;
+        self.write_doc(&dir.join(md(&task.slug)), &doc)?;
         task.fields = doc.fields;
         Ok(())
     }
@@ -270,14 +311,14 @@ impl Store {
         check_slug(&note.slug)?;
         let dir = self.notes_dir(note.space, note.project.as_deref());
         let doc = note.to_doc();
-        write_doc(&dir.join(md(&note.slug)), &doc)?;
+        self.write_doc(&dir.join(md(&note.slug)), &doc)?;
         note.fields = doc.fields;
         Ok(())
     }
 
     pub fn save_journal_entry(&self, entry: &mut JournalEntry) -> io::Result<()> {
         let doc = entry.to_doc();
-        write_doc(&self.journal_path(entry), &doc)?;
+        self.write_doc(&self.journal_path(entry), &doc)?;
         entry.fields = doc.fields;
         Ok(())
     }
@@ -288,14 +329,14 @@ impl Store {
             return Err(invalid("the Inbox can't be deleted"));
         }
         check_slug(&project.slug)?;
-        trash(&self.project_dir(project.space, &project.slug))
+        self.trash(&self.project_dir(project.space, &project.slug))
     }
 
     pub fn trash_task(&self, task: &Task) -> io::Result<()> {
         check_slug(&task.project)?;
         check_slug(&task.slug)?;
         let dir = self.project_dir(task.space, &task.project).join("tasks");
-        trash(&dir.join(md(&task.slug)))
+        self.trash(&dir.join(md(&task.slug)))
     }
 
     pub fn trash_note(&self, note: &Note) -> io::Result<()> {
@@ -303,7 +344,7 @@ impl Store {
             check_slug(p)?;
         }
         check_slug(&note.slug)?;
-        trash(
+        self.trash(
             &self
                 .notes_dir(note.space, note.project.as_deref())
                 .join(md(&note.slug)),
@@ -311,23 +352,66 @@ impl Store {
     }
 
     pub fn trash_journal_entry(&self, entry: &JournalEntry) -> io::Result<()> {
-        trash(&self.journal_path(entry))
+        self.trash(&self.journal_path(entry))
     }
 
     fn write_project(&self, project: &Project) -> io::Result<()> {
         check_slug(&project.slug)?;
         let dir = self.project_dir(project.space, &project.slug);
-        fs::create_dir_all(dir.join("tasks"))?;
-        fs::create_dir_all(dir.join("notes"))?;
-        write_doc(&dir.join("project.md"), &project.to_doc())
+        self.create_dirs(&dir.join("tasks"))?;
+        self.create_dirs(&dir.join("notes"))?;
+        self.write_doc(&dir.join("project.md"), &project.to_doc())
     }
 
     /// Uses `create_new` so a file that appeared since the slug was picked
     /// (an agent writing at the same moment) is never overwritten.
     fn write_new(&self, dir: &Path, slug: &str, doc: Document) -> io::Result<()> {
         use std::io::Write;
-        fs::create_dir_all(dir)?;
-        fs::File::create_new(dir.join(md(slug)))?.write_all(doc.render().as_bytes())
+        self.create_dirs(dir)?;
+        let path = dir.join(md(slug));
+        let text = doc.render();
+        self.log.file(self.rel(&path), text.as_bytes());
+        fs::File::create_new(path)?.write_all(text.as_bytes())
+    }
+
+    /// Writes via a hidden temp file and a rename, so neither the watcher nor
+    /// an agent ever reads a half-written file.
+    fn write_doc(&self, path: &Path, doc: &Document) -> io::Result<()> {
+        let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
+            return Err(invalid(format!("invalid path {path:?}")));
+        };
+        self.create_dirs(dir)?;
+        let tmp = dir.join(format!(".{}.sett-tmp", name.to_string_lossy()));
+        let text = doc.render();
+        fs::write(&tmp, &text)?;
+        // Logged before the rename so the watcher can't see the new content
+        // before it knows sett wrote it.
+        self.log.file(self.rel(path), text.as_bytes());
+        fs::rename(&tmp, path)
+    }
+
+    fn create_dirs(&self, dir: &Path) -> io::Result<()> {
+        for missing in dir.ancestors().take_while(|d| !d.exists()) {
+            self.log.dir(self.rel(missing));
+        }
+        fs::create_dir_all(dir)
+    }
+
+    fn trash(&self, path: &Path) -> io::Result<()> {
+        self.log.removed(self.rel(path), path);
+        trash::delete(path).map_err(io::Error::other)
+    }
+
+    /// The write log is keyed relative to the root so it matches the
+    /// watcher's resolved paths whatever form `root` was given in.
+    fn rel(&self, path: &Path) -> PathBuf {
+        path.strip_prefix(&self.root).unwrap_or(path).to_path_buf()
+    }
+
+    /// Starts watching one Space for changes made outside sett. sett's own
+    /// writes through this `Store` are not reported.
+    pub fn watch(&self, space: Space) -> io::Result<Watcher> {
+        Watcher::start(&self.root, space, self.log.clone())
     }
 
     fn space_dir(&self, space: Space) -> PathBuf {
@@ -359,6 +443,12 @@ impl Store {
     }
 }
 
+/// Board order: by `order`, with unordered Tasks last.
+fn task_order(a: &Task, b: &Task) -> std::cmp::Ordering {
+    let key = |t: &Task| t.order.unwrap_or(f64::INFINITY);
+    key(a).total_cmp(&key(b)).then_with(|| a.slug.cmp(&b.slug))
+}
+
 fn md(slug: &str) -> String {
     format!("{slug}.md")
 }
@@ -381,17 +471,6 @@ fn invalid(msg: impl Into<String>) -> io::Error {
 
 fn not_found(what: String) -> io::Error {
     io::Error::new(io::ErrorKind::NotFound, format!("{what} not found"))
-}
-
-fn write_doc(path: &Path, doc: &Document) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(path, doc.render())
-}
-
-fn trash(path: &Path) -> io::Result<()> {
-    trash::delete(path).map_err(io::Error::other)
 }
 
 /// Unreadable or non-UTF-8 files are treated as absent rather than as errors,
