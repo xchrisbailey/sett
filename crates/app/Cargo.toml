@@ -6,3 +6,8 @@ publish.workspace = true
 
 [dependencies]
 gpui-kit.workspace = true
+sett-store = { path = "../store" }
+
+[dev-dependencies]
+gpui-kit = { workspace = true, features = ["test-support"] }
+tempfile = "3"
