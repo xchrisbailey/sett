@@ -1,5 +1,3 @@
-use std::path::Path;
-
 pub(crate) fn slugify(title: &str) -> String {
     let mut slug = String::new();
     for c in title.chars().flat_map(char::to_lowercase) {
@@ -17,15 +15,14 @@ pub(crate) fn slugify(title: &str) -> String {
     }
 }
 
-/// The first of `base`, `base-2`, `base-3`, ... not already taken in `dir`,
-/// where `taken` maps a candidate slug to the path it would occupy.
-pub(crate) fn unique_slug(dir: &Path, base: &str, taken: impl Fn(&Path, &str) -> bool) -> String {
-    if !taken(dir, base) {
+/// The first of `base`, `base-2`, `base-3`, ... not `taken`.
+pub(crate) fn unique_slug(base: &str, taken: impl Fn(&str) -> bool) -> String {
+    if !taken(base) {
         return base.to_string();
     }
     (2..)
         .map(|n| format!("{base}-{n}"))
-        .find(|candidate| !taken(dir, candidate))
+        .find(|candidate| !taken(candidate))
         .expect("an unbounded range always yields a free slug")
 }
 

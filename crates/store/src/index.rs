@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use crate::links::{Backlink, ItemId, Link, LinkGraph, LinkTarget};
 use crate::{Date, JournalEntry, Note, Project, Space, Store, Task};
 
 /// Something in a Space that may have changed on disk. Applying a `Change`
@@ -54,6 +55,7 @@ pub struct SpaceIndex {
     tasks: BTreeMap<(String, String), Task>,
     notes: BTreeMap<(Option<String>, String), Note>,
     journal: BTreeMap<Date, JournalEntry>,
+    links: LinkGraph,
 }
 
 impl SpaceIndex {
@@ -64,11 +66,16 @@ impl SpaceIndex {
             tasks: BTreeMap::new(),
             notes: BTreeMap::new(),
             journal: BTreeMap::new(),
+            links: LinkGraph::default(),
         };
         for note in store.notes(space, None) {
+            index.link_note(&note);
             index.notes.insert((None, note.slug.clone()), note);
         }
         for entry in store.journal(space) {
+            index
+                .links
+                .set(ItemId::Journal(entry.date), Some(&entry.body));
             index.journal.insert(entry.date, entry);
         }
         for project in store.projects(space) {
@@ -86,18 +93,35 @@ impl SpaceIndex {
     pub fn apply(&mut self, store: &Store, change: &Change) -> Update {
         let space = self.space;
         match change {
-            Change::Task { project, slug } => sync(
-                &mut self.tasks,
-                (project.clone(), slug.clone()),
-                store.task(space, project, slug),
-            ),
-            Change::Note { project, slug } => sync(
-                &mut self.notes,
-                (project.clone(), slug.clone()),
-                store.note(space, project.as_deref(), slug),
-            ),
+            Change::Task { project, slug } => {
+                let fresh = store.task(space, project, slug);
+                self.links.set(
+                    ItemId::Task {
+                        project: project.clone(),
+                        slug: slug.clone(),
+                    },
+                    fresh.as_ref().map(|t| t.body.as_str()),
+                );
+                sync(&mut self.tasks, (project.clone(), slug.clone()), fresh)
+            }
+            Change::Note { project, slug } => {
+                let fresh = store.note(space, project.as_deref(), slug);
+                self.links.set(
+                    ItemId::Note {
+                        project: project.clone(),
+                        slug: slug.clone(),
+                    },
+                    fresh.as_ref().map(|n| n.body.as_str()),
+                );
+                sync(&mut self.notes, (project.clone(), slug.clone()), fresh)
+            }
             Change::Journal(date) => {
-                sync(&mut self.journal, *date, store.journal_entry(space, *date))
+                let fresh = store.journal_entry(space, *date);
+                self.links.set(
+                    ItemId::Journal(*date),
+                    fresh.as_ref().map(|e| e.body.as_str()),
+                );
+                sync(&mut self.journal, *date, fresh)
             }
             Change::Project(slug) => self.apply_project(store, slug),
             Change::All => {
@@ -131,17 +155,29 @@ impl SpaceIndex {
 
     fn load_project_items(&mut self, store: &Store, slug: &str) {
         for task in store.tasks(self.space, slug) {
+            self.links.set(task_id(&task), Some(&task.body));
             self.tasks
                 .insert((slug.to_string(), task.slug.clone()), task);
         }
         for note in store.notes(self.space, Some(slug)) {
+            self.link_note(&note);
             self.notes
                 .insert((Some(slug.to_string()), note.slug.clone()), note);
         }
     }
 
+    fn link_note(&mut self, note: &Note) {
+        self.links.set(note_id(note), Some(&note.body));
+    }
+
     fn take_project_items(&mut self, slug: &str) -> (Vec<Task>, Vec<Note>) {
         let items = self.project_items(slug);
+        for task in &items.0 {
+            self.links.set(task_id(task), None);
+        }
+        for note in &items.1 {
+            self.links.set(note_id(note), None);
+        }
         self.tasks.retain(|(p, _), _| p != slug);
         self.notes.retain(|(p, _), _| p.as_deref() != Some(slug));
         items
@@ -207,6 +243,48 @@ impl SpaceIndex {
 
     pub fn journal_entry(&self, date: Date) -> Option<&JournalEntry> {
         self.journal.get(&date)
+    }
+
+    /// The Item a Link to `slug` leads to. Only Items in this Space count
+    /// (ADR 0002).
+    pub fn resolve(&self, slug: &str) -> LinkTarget {
+        self.links.resolve(slug)
+    }
+
+    /// The Item's outgoing Links, one per distinct slug, in body order.
+    pub fn links(&self, item: &ItemId) -> Vec<Link> {
+        self.links.links(item)
+    }
+
+    /// The Items whose Links resolve to `item`. An Item that only shares a
+    /// duplicated slug but isn't the one it resolves to has none.
+    pub fn backlinks(&self, item: &ItemId) -> Vec<Backlink> {
+        self.links.backlinks(item)
+    }
+
+    /// A Note's or Task's title, or a Journal Entry's date.
+    pub fn title(&self, item: &ItemId) -> Option<String> {
+        match item {
+            ItemId::Note { project, slug } => {
+                self.note(project.as_deref(), slug).map(|n| n.title.clone())
+            }
+            ItemId::Task { project, slug } => self.task(project, slug).map(|t| t.title.clone()),
+            ItemId::Journal(date) => self.journal_entry(*date).map(|e| e.date.to_string()),
+        }
+    }
+}
+
+fn task_id(task: &Task) -> ItemId {
+    ItemId::Task {
+        project: task.project.clone(),
+        slug: task.slug.clone(),
+    }
+}
+
+fn note_id(note: &Note) -> ItemId {
+    ItemId::Note {
+        project: note.project.clone(),
+        slug: note.slug.clone(),
     }
 }
 

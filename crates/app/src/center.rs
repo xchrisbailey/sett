@@ -7,6 +7,8 @@ use gpui_kit::{
     Subscription, TestSupportExt as _, Window, div,
 };
 
+use sett_store::{ItemId, Space};
+
 use crate::board::{BoardEvent, BoardView};
 use crate::item_editor::{ItemEditor, ItemRef};
 use crate::notes::{NotesScope, NotesView};
@@ -85,26 +87,61 @@ impl CenterPanel {
     /// Saves pending edits in whatever was just hidden, and opens today's
     /// Journal Entry when the Journal is shown.
     fn sync(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let opening = self.workspace.update(cx, |w, _| w.take_opening());
+        match &opening {
+            Some(ItemId::Task { .. }) => self.project_tab = ProjectTab::Board,
+            Some(ItemId::Note {
+                project: Some(_), ..
+            }) => self.project_tab = ProjectTab::Notes,
+            _ => {}
+        }
         let workspace = self.workspace.read(cx);
         let (space, selection) = (workspace.space(), workspace.selection());
         let shown = Some((selection.clone(), self.project_tab));
-        if shown == self.shown {
-            return;
-        }
-        self.shown = shown;
-        self.notes.update(cx, |notes, cx| notes.flush(window, cx));
-        self.project_notes
-            .update(cx, |notes, cx| notes.flush(window, cx));
-        self.journal
-            .update(cx, |journal, cx| journal.flush(window, cx));
-        self.task.update(cx, |task, cx| task.close(window, cx));
-        if selection == Selection::Journal {
-            let today = ItemRef::Journal {
-                space,
-                date: today(),
-            };
+        if shown != self.shown {
+            self.shown = shown;
+            self.notes.update(cx, |notes, cx| notes.flush(window, cx));
+            self.project_notes
+                .update(cx, |notes, cx| notes.flush(window, cx));
+            self.task.update(cx, |task, cx| task.close(window, cx));
             self.journal
-                .update(cx, |journal, cx| journal.open(today, window, cx));
+                .update(cx, |journal, cx| journal.flush(window, cx));
+            if selection == Selection::Journal && !matches!(opening, Some(ItemId::Journal(_))) {
+                let today = ItemRef::Journal {
+                    space,
+                    date: today(),
+                };
+                self.journal
+                    .update(cx, |journal, cx| journal.open(today, window, cx));
+            }
+        }
+        if let Some(item) = opening {
+            self.reveal(item, space, window, cx);
+        }
+    }
+
+    /// Opens an Item the Workspace was asked to open, once its view is the
+    /// one selected.
+    fn reveal(&mut self, item: ItemId, space: Space, window: &mut Window, cx: &mut Context<Self>) {
+        match item {
+            ItemId::Note {
+                project: None,
+                slug,
+            } => self
+                .notes
+                .update(cx, |notes, cx| notes.reveal(&slug, window, cx)),
+            ItemId::Note {
+                project: Some(_),
+                slug,
+            } => self
+                .project_notes
+                .update(cx, |notes, cx| notes.reveal(&slug, window, cx)),
+            ItemId::Task { slug, .. } => self
+                .board
+                .update(cx, |board, cx| board.reveal_task(&slug, window, cx)),
+            ItemId::Journal(date) => self.journal.update(cx, |journal, cx| {
+                journal.open(ItemRef::Journal { space, date }, window, cx)
+            }),
         }
     }
 

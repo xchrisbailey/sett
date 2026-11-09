@@ -206,6 +206,13 @@ impl BoardView {
         }
     }
 
+    /// Opens a Task of whichever Project is now selected, as following a
+    /// Link to it does.
+    pub(crate) fn reveal_task(&mut self, slug: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.sync(window, cx);
+        self.open_task(slug, cx);
+    }
+
     fn open_task(&mut self, slug: &str, cx: &mut Context<Self>) {
         let Some(project) = self.project.clone() else {
             return;

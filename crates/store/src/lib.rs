@@ -10,10 +10,12 @@ mod date;
 mod frontmatter;
 mod index;
 mod item;
+mod links;
 mod settings;
 mod slug;
 mod watch;
 
+use std::collections::HashSet;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -26,6 +28,7 @@ pub use date::Date;
 use frontmatter::Document;
 pub use index::{Change, SpaceIndex, Update};
 pub use item::{JournalEntry, Note, RECENT_DONE_DAYS, Task};
+pub use links::{Backlink, ItemId, Link, LinkTarget};
 pub use settings::{EditorMode, Settings};
 pub use watch::Watcher;
 use watch::WriteLog;
@@ -249,9 +252,8 @@ impl Store {
         name: &str,
         icon: Option<&str>,
     ) -> io::Result<Project> {
-        let slug = slug::unique_slug(&self.projects_dir(space), &slug::slugify(name), |dir, s| {
-            dir.join(s).exists()
-        });
+        let dir = self.projects_dir(space);
+        let slug = slug::unique_slug(&slug::slugify(name), |s| dir.join(s).exists());
         let mut project = Project::from_doc(space, &slug, Document::default());
         project.name = name.to_string();
         project.icon = Some(icon.unwrap_or(DEFAULT_ICON).to_string());
@@ -315,8 +317,7 @@ impl Store {
 
     /// A Task with a fresh slug from `title`, not yet written.
     fn blank_task(&self, space: Space, project: &str, title: &str, today: Date) -> Task {
-        let dir = self.project_dir(space, project).join("tasks");
-        let slug = slug::unique_slug(&dir, &slug::slugify(title), md_exists);
+        let slug = self.unique_item_slug(space, title);
         let mut task = Task::from_doc(space, project, &slug, Document::default());
         task.title = title.to_string();
         task.created = Some(today);
@@ -371,7 +372,7 @@ impl Store {
             check_slug(p)?;
         }
         let dir = self.notes_dir(space, project);
-        let slug = slug::unique_slug(&dir, &slug::slugify(title), md_exists);
+        let slug = self.unique_item_slug(space, title);
         let mut note = Note::from_doc(space, project, &slug, Document::default());
         note.title = title.to_string();
         note.created = Some(today);
@@ -379,6 +380,21 @@ impl Store {
         note.fields = note.to_doc().fields;
         note.modified = modified(&dir.join(md(&slug)));
         Ok(note)
+    }
+
+    /// A slug from `title` that no Note or Task anywhere in the Space has,
+    /// archived Projects included, so a Link to it is never ambiguous.
+    /// Date-shaped slugs are left to Journal Entries.
+    fn unique_item_slug(&self, space: Space, title: &str) -> String {
+        let mut dirs = vec![self.notes_dir(space, None)];
+        for (_, project) in subdirs(&self.projects_dir(space)) {
+            dirs.push(project.join("notes"));
+            dirs.push(project.join("tasks"));
+        }
+        let taken: HashSet<String> = dirs.iter().flat_map(|d| markdown_stems(d)).collect();
+        slug::unique_slug(&slug::slugify(title), |s| {
+            taken.contains(s) || Date::parse(s).is_some()
+        })
     }
 
     pub fn save_project(&self, project: &mut Project) -> io::Result<()> {
@@ -555,8 +571,18 @@ fn md(slug: &str) -> String {
     format!("{slug}.md")
 }
 
-fn md_exists(dir: &Path, slug: &str) -> bool {
-    dir.join(md(slug)).exists()
+/// The stem of every `*.md` file in `dir`, without reading them.
+fn markdown_stems(dir: &Path) -> Vec<String> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().into_string().ok()?;
+            Some(name.strip_suffix(".md")?.to_string())
+        })
+        .collect()
 }
 
 fn check_slug(slug: &str) -> io::Result<()> {

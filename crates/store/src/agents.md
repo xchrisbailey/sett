@@ -58,9 +58,12 @@ Dates are always `YYYY-MM-DD`. The body after the frontmatter is any Markdown.
 - The last column means done. The first column means not started; every column
   between means in progress. To finish a Task, move it to the last column and
   set `done` to today's date.
-- Link to another Item in the same Space with `[[slug]]`.
+- Link to another Item in the same Space with `[[slug]]`, `[[slug|label]]` or
+  `[[slug#heading]]`. Link a Journal Entry by its date, `[[YYYY-MM-DD]]`.
 - Slugs (file and folder names) are stable. Never rename a file when its title
   changes, because Links point at the slug. New slugs come from the title,
-  lowercased with dashes; on a clash add `-2`, `-3`, and so on.
+  lowercased with dashes. A Note or Task slug must be unique across the whole
+  Space (every Project's Notes and Tasks, archived ones too, and Space-level
+  Notes); on a clash add `-2`, `-3`, and so on.
 - Keep frontmatter keys you don't recognise. sett preserves them.
 - The `inbox` Project can't be deleted or archived.

@@ -5,6 +5,7 @@ mod board;
 mod center;
 mod icons;
 mod item_editor;
+mod item_links;
 mod nav;
 mod notes;
 mod project_dialog;
