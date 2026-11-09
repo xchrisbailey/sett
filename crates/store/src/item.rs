@@ -3,6 +3,9 @@ use serde_yaml_ng::Mapping;
 use crate::frontmatter::Document;
 use crate::{Date, Space};
 
+/// How long a done Task stays visible in the last Column.
+pub const RECENT_DONE_DAYS: i64 = 14;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Task {
     pub space: Space,
@@ -53,19 +56,67 @@ impl Task {
         doc
     }
 
+    /// `(checked, total)` over every `- [ ]` / `- [x]` line in the body,
+    /// nested or not, or `None` when there are no boxes. Lines inside fenced
+    /// code blocks are skipped since they are examples, not work.
+    pub fn checklist(&self) -> Option<(usize, usize)> {
+        let mut in_fence = false;
+        let (mut checked, mut total) = (0, 0);
+        for line in self.body.lines() {
+            let line = line.trim_start();
+            if line.starts_with("```") || line.starts_with("~~~") {
+                in_fence = !in_fence;
+                continue;
+            }
+            if in_fence {
+                continue;
+            }
+            let Some(rest) = ["- ", "* ", "+ "]
+                .iter()
+                .find_map(|bullet| line.strip_prefix(bullet))
+            else {
+                continue;
+            };
+            if rest.starts_with("[ ]") {
+                total += 1;
+            } else if rest.starts_with("[x]") || rest.starts_with("[X]") {
+                total += 1;
+                checked += 1;
+            }
+        }
+        (total > 0).then_some((checked, total))
+    }
+
+    /// Whether the Task shows in the last Column without "show all": it has
+    /// no `done` date (hand-edited files) or was done in the past
+    /// [`RECENT_DONE_DAYS`] days.
+    pub fn is_recently_done(&self, today: Date) -> bool {
+        self.done
+            .is_none_or(|done| today.days_since(done) <= RECENT_DONE_DAYS)
+    }
+
     /// Moves the Task to `column`, keeping `done` in step with the rule that
     /// the last Column of the Board means done.
     pub fn move_to(&mut self, column: &str, order: f64, columns: &[String], today: Date) {
-        let entering_last = columns.last().is_some_and(|last| last == column);
-        if entering_last {
-            if self.done.is_none() {
-                self.done = Some(today);
-            }
-        } else {
-            self.done = None;
-        }
         self.column = Some(column.to_string());
         self.order = Some(order);
+        self.sync_done(columns, today);
+    }
+
+    /// Sets `done` when the Task is in the last Column and clears it when it
+    /// isn't, keeping an existing date. Returns whether `done` changed.
+    pub(crate) fn sync_done(&mut self, columns: &[String], today: Date) -> bool {
+        let in_last = columns
+            .last()
+            .is_some_and(|last| self.column.as_ref() == Some(last));
+        let done = match self.done {
+            Some(_) if in_last => self.done,
+            None if in_last => Some(today),
+            _ => None,
+        };
+        let changed = done != self.done;
+        self.done = done;
+        changed
     }
 }
 

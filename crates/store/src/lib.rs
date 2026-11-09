@@ -5,6 +5,7 @@
 //! the explicit `create_*`, `save_*` and `trash_*` calls, so callers control
 //! that an Item is written only after it was edited (ADR 0003).
 
+mod board;
 mod date;
 mod frontmatter;
 mod index;
@@ -19,10 +20,11 @@ use std::path::{Path, PathBuf};
 
 use serde_yaml_ng::{Mapping, Value};
 
+pub use board::{Board, BoardColumn, MIN_COLUMNS};
 pub use date::Date;
 use frontmatter::Document;
 pub use index::{Change, SpaceIndex, Update};
-pub use item::{JournalEntry, Note, Task};
+pub use item::{JournalEntry, Note, RECENT_DONE_DAYS, Task};
 pub use settings::{EditorMode, Settings};
 pub use watch::Watcher;
 use watch::WriteLog;
@@ -238,13 +240,7 @@ impl Store {
         title: &str,
         today: Date,
     ) -> io::Result<Task> {
-        check_slug(project)?;
-        let columns = self
-            .projects(space)
-            .into_iter()
-            .find(|p| p.slug == project)
-            .map(|p| p.columns)
-            .ok_or_else(|| not_found(format!("project {project}")))?;
+        let columns = self.columns_of(space, project)?;
         let first = columns.first().cloned();
         let last_order = self
             .tasks(space, project)
@@ -252,17 +248,88 @@ impl Store {
             .filter(|t| t.column == first)
             .filter_map(|t| t.order)
             .fold(0.0, f64::max);
+        let mut task = self.blank_task(space, project, title, today);
+        task.column = first;
+        task.order = Some(last_order + 1.0);
+        self.write_task_new(task)
+    }
 
+    /// Writes a Task at the top of Column `column`, where the quick-add box
+    /// that creates it sits. In the last Column it is created done.
+    pub fn create_task_in(
+        &self,
+        space: Space,
+        project: &str,
+        column: &str,
+        title: &str,
+        today: Date,
+    ) -> io::Result<Task> {
+        let columns = self.columns_of(space, project)?;
+        if !columns.iter().any(|c| c == column) {
+            return Err(not_found(format!("column {column}")));
+        }
+        let tasks = self.tasks(space, project);
+        let first_order = Board::new(&columns, &tasks)
+            .column(column)
+            .and_then(|c| c.tasks().iter().find_map(|t| t.order))
+            .unwrap_or(1.0);
+        let mut task = self.blank_task(space, project, title, today);
+        task.move_to(column, first_order - 1.0, &columns, today);
+        self.write_task_new(task)
+    }
+
+    fn columns_of(&self, space: Space, project: &str) -> io::Result<Vec<String>> {
+        check_slug(project)?;
+        self.project(space, project)
+            .map(|p| p.columns)
+            .ok_or_else(|| not_found(format!("project {project}")))
+    }
+
+    /// A Task with a fresh slug from `title`, not yet written.
+    fn blank_task(&self, space: Space, project: &str, title: &str, today: Date) -> Task {
         let dir = self.project_dir(space, project).join("tasks");
         let slug = slug::unique_slug(&dir, &slug::slugify(title), md_exists);
         let mut task = Task::from_doc(space, project, &slug, Document::default());
         task.title = title.to_string();
-        task.column = first;
-        task.order = Some(last_order + 1.0);
         task.created = Some(today);
-        self.write_new(&dir, &slug, task.to_doc())?;
+        task
+    }
+
+    fn write_task_new(&self, mut task: Task) -> io::Result<Task> {
+        let dir = self.project_dir(task.space, &task.project).join("tasks");
+        self.write_new(&dir, &task.slug, task.to_doc())?;
         task.fields = task.to_doc().fields;
         Ok(task)
+    }
+
+    /// Moves the Task `slug` into Column `to`, before the Task `before` or at
+    /// the end, and returns the Tasks it wrote. Only the moved Task's file is
+    /// written unless its new neighbours have no room left between their
+    /// orders, in which case the Column is renumbered.
+    pub fn move_task(
+        &self,
+        board: &Board,
+        slug: &str,
+        to: &str,
+        before: Option<&str>,
+        today: Date,
+    ) -> io::Result<Vec<Task>> {
+        let plan = board
+            .plan_move(slug, to, before)
+            .ok_or_else(|| not_found(format!("task {slug} or column {to}")))?;
+        let mut written = Vec::with_capacity(plan.len());
+        for (task, order) in plan {
+            let mut task = task.clone();
+            if task.slug == slug {
+                task.move_to(to, order, board.column_names(), today);
+            } else {
+                task.column = Some(to.to_string());
+                task.order = Some(order);
+            }
+            self.save_task(&mut task)?;
+            written.push(task);
+        }
+        Ok(written)
     }
 
     pub fn create_note(

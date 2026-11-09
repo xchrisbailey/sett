@@ -44,6 +44,22 @@ impl Date {
     pub fn day(self) -> u8 {
         self.day
     }
+
+    /// Whole days from `earlier` to `self`; negative when `earlier` is later.
+    pub fn days_since(self, earlier: Date) -> i64 {
+        self.day_number() - earlier.day_number()
+    }
+
+    /// Days since 1970-01-01 (Howard Hinnant's `days_from_civil`).
+    fn day_number(self) -> i64 {
+        let (m, d) = (i64::from(self.month), i64::from(self.day));
+        let y = i64::from(self.year) - i64::from(m <= 2);
+        let era = y.div_euclid(400);
+        let yoe = y - era * 400;
+        let doy = (153 * (m + if m > 2 { -3 } else { 9 }) + 2) / 5 + d - 1;
+        let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+        era * 146_097 + doe - 719_468
+    }
 }
 
 fn days_in_month(year: u16, month: u8) -> u8 {
