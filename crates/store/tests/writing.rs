@@ -45,8 +45,8 @@ fn new_items_get_slugs_from_titles_and_clashes_are_numbered() {
         .create_note(Space::Work, None, "Fix the login bug", today)
         .unwrap();
     assert_eq!(
-        note.slug, "fix-the-login-bug",
-        "Notes don't clash with Tasks"
+        note.slug, "fix-the-login-bug-4",
+        "slugs are unique across the Space so Links aren't ambiguous"
     );
 
     let project = store.create_project(Space::Work, "Inbox", None).unwrap();
