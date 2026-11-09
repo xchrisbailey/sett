@@ -14,32 +14,32 @@ use gpui_kit::{
     px,
 };
 
+use crate::app_model::AppModel;
 use crate::icons::{DEFAULT_ICON, PROJECT_ICONS, icon_name, project_icon};
-use crate::workspace::Workspace;
 
 /// Opens the dialog that creates a Project in the active Space.
-pub(crate) fn open_new_project(workspace: Entity<Workspace>, window: &mut Window, cx: &mut App) {
-    open_project_form(workspace, None, window, cx);
+pub(crate) fn open_new_project(model: Entity<AppModel>, window: &mut Window, cx: &mut App) {
+    open_project_form(model, None, window, cx);
 }
 
 /// Opens the dialog that renames a Project or changes its icon.
 pub(crate) fn open_edit_project(
-    workspace: Entity<Workspace>,
+    model: Entity<AppModel>,
     slug: String,
     window: &mut Window,
     cx: &mut App,
 ) {
-    open_project_form(workspace, Some(slug), window, cx);
+    open_project_form(model, Some(slug), window, cx);
 }
 
 /// Asks before moving a Project's folder to the Trash.
 pub(crate) fn confirm_delete_project(
-    workspace: Entity<Workspace>,
+    model: Entity<AppModel>,
     slug: String,
     window: &mut Window,
     cx: &mut App,
 ) {
-    let Some(name) = workspace
+    let Some(name) = model
         .read(cx)
         .index()
         .project(&slug)
@@ -49,7 +49,7 @@ pub(crate) fn confirm_delete_project(
     };
     let title = SharedString::from(format!("Delete \u{201c}{name}\u{201d}?"));
     window.open_alert_dialog(cx, move |alert, _, _| {
-        let workspace = workspace.clone();
+        let model = model.clone();
         let slug = slug.clone();
         alert
             .confirm()
@@ -62,7 +62,7 @@ pub(crate) fn confirm_delete_project(
             .ok_variant(ButtonVariant::Danger)
             .cancel_text("Cancel")
             .on_ok(move |_, window, cx| {
-                let result = workspace.update(cx, |w, cx| w.trash_project(&slug, cx));
+                let result = model.update(cx, |w, cx| w.trash_project(&slug, cx));
                 if let Err(err) = result {
                     show_error("Couldn\u{2019}t delete the Project", err, window, cx);
                 }
@@ -73,13 +73,13 @@ pub(crate) fn confirm_delete_project(
 
 /// Archives or unarchives a Project, reporting a failed write.
 pub(crate) fn set_archived(
-    workspace: &Entity<Workspace>,
+    model: &Entity<AppModel>,
     slug: &str,
     archived: bool,
     window: &mut Window,
     cx: &mut App,
 ) {
-    if let Err(err) = workspace.update(cx, |w, cx| w.set_archived(slug, archived, cx)) {
+    if let Err(err) = model.update(cx, |w, cx| w.set_archived(slug, archived, cx)) {
         show_error("Couldn\u{2019}t update the Project", err, window, cx);
     }
 }
@@ -90,14 +90,14 @@ fn show_error(what: &str, err: std::io::Error, window: &mut Window, cx: &mut App
 
 /// `editing` is the slug of the Project being edited, or `None` to create one.
 fn open_project_form(
-    workspace: Entity<Workspace>,
+    model: Entity<AppModel>,
     editing: Option<String>,
     window: &mut Window,
     cx: &mut App,
 ) {
     let existing = editing
         .as_deref()
-        .and_then(|slug| workspace.read(cx).index().project(slug));
+        .and_then(|slug| model.read(cx).index().project(slug));
     let (name, icon) = match existing {
         Some(p) => (p.name.clone(), project_icon(p.icon.as_deref())),
         None if editing.is_some() => return,
@@ -120,7 +120,7 @@ fn open_project_form(
                 .focus(window, cx);
         }
         let form_ok = form.clone();
-        let workspace = workspace.clone();
+        let model = model.clone();
         let editing = editing.clone();
         dialog
             .title(title)
@@ -131,7 +131,7 @@ fn open_project_form(
                     return false;
                 };
                 let icon = icon_name(icon);
-                let result = workspace.update(cx, |w, cx| match &editing {
+                let result = model.update(cx, |w, cx| match &editing {
                     Some(slug) => w.update_project(slug, &name, Some(&icon), cx),
                     None => w.create_project(&name, Some(&icon), cx).map(|_| ()),
                 });

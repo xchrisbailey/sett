@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use sett_store::{Backlink, Change, ItemId, Link, LinkTarget, Space, SpaceIndex, Store};
+use sett_store::{Change, InboundLink, ItemId, Link, LinkTarget, Space, SpaceIndex, Store};
 
 fn write(root: &Path, rel: &str, text: &str) {
     let path = root.join(rel);
@@ -23,7 +23,7 @@ fn space_note(slug: &str) -> ItemId {
 }
 
 #[test]
-fn backlinks_list_the_items_that_link_here() {
+fn inbound_links_list_the_items_that_link_here() {
     let (_dir, store) = new_store();
     let root = store.root().to_path_buf();
     write(&root, "work/notes/plan.md", "---\ntitle: Plan\n---\n");
@@ -40,13 +40,13 @@ fn backlinks_list_the_items_that_link_here() {
     let index = SpaceIndex::scan(&store, Space::Work);
 
     assert_eq!(
-        index.backlinks(&space_note("plan")),
+        index.inbound_links(&space_note("plan")),
         vec![
-            Backlink {
+            InboundLink {
                 source: space_note("ideas"),
                 ambiguous: false
             },
-            Backlink {
+            InboundLink {
                 source: ItemId::Task {
                     project: "inbox".into(),
                     slug: "ship".into()
@@ -55,7 +55,7 @@ fn backlinks_list_the_items_that_link_here() {
             },
         ]
     );
-    assert!(index.backlinks(&space_note("ideas")).is_empty());
+    assert!(index.inbound_links(&space_note("ideas")).is_empty());
 }
 
 fn task_id(project: &str, slug: &str) -> ItemId {
@@ -119,8 +119,8 @@ fn journal_entries_are_linked_by_date() {
         }
     );
     assert_eq!(
-        index.backlinks(&space_note("plan")),
-        vec![Backlink {
+        index.inbound_links(&space_note("plan")),
+        vec![InboundLink {
             source: day,
             ambiguous: false
         }]
@@ -145,14 +145,14 @@ fn duplicate_slugs_resolve_by_path_with_space_notes_first() {
     };
     assert_eq!(index.resolve("x"), found(task_id("a", "x")));
     assert_eq!(
-        index.backlinks(&task_id("a", "x")),
-        vec![Backlink {
+        index.inbound_links(&task_id("a", "x")),
+        vec![InboundLink {
             source: space_note("doc"),
             ambiguous: true
         }]
     );
-    // The losing candidates have no backlinks rather than sharing them.
-    assert!(index.backlinks(&task_id("b", "x")).is_empty());
+    // The losing candidates have no inbound Links rather than sharing them.
+    assert!(index.inbound_links(&task_id("b", "x")).is_empty());
 
     write(&root, "work/notes/x.md", "");
     index.apply(
@@ -179,12 +179,12 @@ fn the_graph_follows_changes_to_one_item() {
 
     write(&root, "work/notes/doc.md", "[[other]]\n");
     index.apply(&store, &doc);
-    assert!(index.backlinks(&space_note("plan")).is_empty());
+    assert!(index.inbound_links(&space_note("plan")).is_empty());
     assert_eq!(slugs(&index.links(&space_note("doc"))), vec!["other"]);
 
     write(&root, "work/notes/doc.md", "[[plan]]\n");
     index.apply(&store, &doc);
-    assert_eq!(index.backlinks(&space_note("plan")).len(), 1);
+    assert_eq!(index.inbound_links(&space_note("plan")).len(), 1);
 
     // Removing the target breaks the Link; removing the source drops it.
     fs::remove_file(root.join("work/notes/plan.md")).unwrap();
@@ -210,12 +210,12 @@ fn the_graph_follows_changes_to_one_item() {
             ambiguous: false
         }
     );
-    assert_eq!(index.backlinks(&space_note("doc")).len(), 1);
+    assert_eq!(index.inbound_links(&space_note("doc")).len(), 1);
 
     fs::remove_dir_all(root.join("work/projects/site")).unwrap();
     index.apply(&store, &Change::Project("site".into()));
     assert_eq!(index.resolve("plan"), LinkTarget::Broken);
-    assert!(index.backlinks(&space_note("doc")).is_empty());
+    assert!(index.inbound_links(&space_note("doc")).is_empty());
 }
 
 #[test]
@@ -230,7 +230,7 @@ fn links_never_reach_the_other_space() {
         index.links(&space_note("doc"))[0].target,
         LinkTarget::Broken
     );
-    assert!(index.backlinks(&space_note("doc")).is_empty());
+    assert!(index.inbound_links(&space_note("doc")).is_empty());
 }
 
 #[test]

@@ -64,9 +64,9 @@ fn creating_a_project_through_the_dialog_adds_it_to_the_nav(cx: &mut TestAppCont
 #[gpui_kit::test]
 fn archiving_moves_a_project_to_the_archived_group_and_back(cx: &mut TestAppContext) {
     let f = open_shell(cx);
-    let workspace = f.workspace(cx);
+    let model = f.model(cx);
     cx.update(|cx| {
-        workspace.update(cx, |w, cx| w.create_project("Website", None, cx).unwrap());
+        model.update(cx, |w, cx| w.create_project("Website", None, cx).unwrap());
     });
 
     cx.update_window(f.window, |_, window, cx| {
@@ -120,9 +120,9 @@ fn archiving_moves_a_project_to_the_archived_group_and_back(cx: &mut TestAppCont
 #[gpui_kit::test]
 fn the_inbox_offers_no_archive_or_delete(cx: &mut TestAppContext) {
     let f = open_shell(cx);
-    let workspace = f.workspace(cx);
+    let model = f.model(cx);
     cx.update(|cx| {
-        workspace.update(cx, |w, cx| w.create_project("Website", None, cx).unwrap());
+        model.update(cx, |w, cx| w.create_project("Website", None, cx).unwrap());
     });
 
     // A normal Project's menu has both, so their absence below means something.
@@ -155,10 +155,10 @@ fn the_inbox_offers_no_archive_or_delete(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn deleting_a_project_confirms_then_trashes_its_folder(cx: &mut TestAppContext) {
     let f = open_shell(cx);
-    let workspace = f.workspace(cx);
+    let model = f.model(cx);
     // Stands in for the macOS Trash, which these tests must not touch.
     cx.update(|cx| {
-        workspace.update(cx, |w, cx| {
+        model.update(cx, |w, cx| {
             w.set_trash(|path| fs::remove_dir_all(path));
             w.create_project("Website", None, cx).unwrap();
         });

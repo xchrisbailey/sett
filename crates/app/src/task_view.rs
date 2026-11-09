@@ -16,8 +16,8 @@ use gpui_kit::{
 };
 use sett_store::{Board, Date, Space};
 
+use crate::app_model::AppModel;
 use crate::item_editor::{ItemEditor, ItemRef};
-use crate::workspace::Workspace;
 
 actions!(sett, [CloseTask]);
 
@@ -42,7 +42,7 @@ type ColumnSelect = SelectState<SearchableVec<SharedString>>;
 /// only this Task's file. The title and body follow the editor's rule of
 /// saving only after a real edit (ADR 0003).
 pub(crate) struct TaskView {
-    workspace: Entity<Workspace>,
+    model: Entity<AppModel>,
     /// The open Task: its Project and slug.
     task: Option<(String, String)>,
     /// The Space the Task is in. Both Spaces have an Inbox, so a Space switch
@@ -52,7 +52,7 @@ pub(crate) struct TaskView {
     column: Entity<ColumnSelect>,
     due: Entity<DatePickerState>,
     /// The Columns, Column and due date last put into the controls, so a
-    /// Workspace change that doesn't touch them leaves the controls alone.
+    /// AppModel change that doesn't touch them leaves the controls alone.
     shown: Option<(Vec<String>, String, Option<Date>)>,
     focus_handle: FocusHandle,
     _subscriptions: Vec<Subscription>,
@@ -68,11 +68,11 @@ impl Focusable for TaskView {
 
 impl TaskView {
     pub(crate) fn new(
-        workspace: Entity<Workspace>,
+        model: Entity<AppModel>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let editor = cx.new(|cx| ItemEditor::new(workspace.clone(), window, cx));
+        let editor = cx.new(|cx| ItemEditor::new(model.clone(), window, cx));
         let column =
             cx.new(|cx| SelectState::new(SearchableVec::new(Vec::new()), None, window, cx));
         let due = cx.new(|cx| DatePickerState::new(window, cx).date_format("%b %-d, %Y"));
@@ -92,13 +92,11 @@ impl TaskView {
                 let due = value.start().and_then(store_date);
                 this.set_due(due, window, cx);
             }),
-            cx.observe_in(&workspace, window, |this, _, window, cx| {
-                this.sync(window, cx)
-            }),
+            cx.observe_in(&model, window, |this, _, window, cx| this.sync(window, cx)),
         ];
-        let space = workspace.read(cx).space();
+        let space = model.read(cx).space();
         TaskView {
-            workspace,
+            model,
             task: None,
             space,
             editor,
@@ -118,7 +116,7 @@ impl TaskView {
     pub(crate) fn title(&self, cx: &App) -> SharedString {
         self.task
             .as_ref()
-            .and_then(|(project, slug)| self.workspace.read(cx).index().task(project, slug))
+            .and_then(|(project, slug)| self.model.read(cx).index().task(project, slug))
             .map(|t| SharedString::from(t.title.clone()))
             .unwrap_or_default()
     }
@@ -132,7 +130,7 @@ impl TaskView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let space = self.workspace.read(cx).space();
+        let space = self.model.read(cx).space();
         let item = ItemRef::Task {
             space,
             project: project.to_string(),
@@ -165,14 +163,12 @@ impl TaskView {
         let Some((project, slug)) = self.task.clone() else {
             return;
         };
-        let workspace = self.workspace.read(cx);
-        let index = workspace.index();
+        let model = self.model.read(cx);
+        let index = model.index();
         let task = index.task(&project, &slug);
-        let (true, Some(project), Some(_)) = (
-            workspace.space() == self.space,
-            index.project(&project),
-            task,
-        ) else {
+        let (true, Some(project), Some(_)) =
+            (model.space() == self.space, index.project(&project), task)
+        else {
             self.close(window, cx);
             return;
         };
@@ -214,7 +210,7 @@ impl TaskView {
             return;
         }
         let result = self
-            .workspace
+            .model
             .update(cx, |w, cx| w.move_task(&project, &slug, column, None, cx));
         if let Err(err) = result {
             show_error("Couldn\u{2019}t move the Task", err, window, cx);
@@ -226,7 +222,7 @@ impl TaskView {
             return;
         };
         let result = self
-            .workspace
+            .model
             .update(cx, |w, cx| w.set_task_due(&project, &slug, due, cx));
         if let Err(err) = result {
             show_error("Couldn\u{2019}t change the due date", err, window, cx);

@@ -7,10 +7,10 @@ use gpui_kit::{
 };
 use sett_store::Space;
 
+use crate::app_model::{AppModel, Selection};
 use crate::center::CenterPanel;
 use crate::nav::Nav;
 use crate::project_dialog;
-use crate::workspace::{Selection, Workspace};
 
 actions!(sett, [ShowPersonal, ShowWork, ToggleEditorMode]);
 
@@ -42,50 +42,50 @@ pub fn init(cx: &mut App) {
 /// The main window: a title bar with the Space toggle above the left nav and
 /// the center panel.
 pub struct Shell {
-    workspace: Entity<Workspace>,
+    model: Entity<AppModel>,
     center: Entity<CenterPanel>,
     focus_handle: FocusHandle,
     _observe: Subscription,
 }
 
 impl Shell {
-    pub fn new(workspace: Entity<Workspace>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let center = cx.new(|cx| CenterPanel::new(workspace.clone(), window, cx));
-        let observe = cx.observe(&workspace, |_, _, cx| cx.notify());
+    pub fn new(model: Entity<AppModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let center = cx.new(|cx| CenterPanel::new(model.clone(), window, cx));
+        let observe = cx.observe(&model, |_, _, cx| cx.notify());
         let focus_handle = cx.focus_handle();
         // The Space shortcuts live on the shell's key context, so it needs focus
         // for them to work before anything inside it has been clicked.
         focus_handle.focus(window, cx);
         Shell {
-            workspace,
+            model,
             center,
             focus_handle,
             _observe: observe,
         }
     }
 
-    pub fn workspace(&self) -> &Entity<Workspace> {
-        &self.workspace
+    pub fn model(&self) -> &Entity<AppModel> {
+        &self.model
     }
 
     fn show_space(&mut self, space: Space, cx: &mut Context<Self>) {
-        self.workspace
-            .update(cx, |workspace, cx| workspace.switch_space(space, cx));
+        self.model
+            .update(cx, |model, cx| model.switch_space(space, cx));
     }
 
     /// The selected Project's slug and whether it's archived, unless nothing
     /// or the Inbox (which can't be edited, archived or deleted) is selected.
     fn selected_project(&self, cx: &App) -> Option<(String, bool)> {
-        let workspace = self.workspace.read(cx);
-        let Selection::Project(slug) = workspace.selection() else {
+        let model = self.model.read(cx);
+        let Selection::Project(slug) = model.selection() else {
             return None;
         };
-        let project = workspace.index().project(&slug)?;
+        let project = model.index().project(&slug)?;
         (!project.is_inbox()).then_some((slug, project.archived))
     }
 
     fn render_title_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let selected = match self.workspace.read(cx).space() {
+        let selected = match self.model.read(cx).space() {
             Space::Personal => 0,
             Space::Work => 1,
         };
@@ -127,16 +127,16 @@ impl Render for Shell {
             )
             .on_action(cx.listener(|this, _: &ShowWork, _, cx| this.show_space(Space::Work, cx)))
             .on_action(cx.listener(|this, _: &ToggleEditorMode, _, cx| {
-                this.workspace
-                    .update(cx, |workspace, cx| workspace.toggle_editor_mode(cx))
+                this.model
+                    .update(cx, |model, cx| model.toggle_editor_mode(cx))
             }))
             .on_action(cx.listener(|this, _: &NewProject, window, cx| {
-                project_dialog::open_new_project(this.workspace.clone(), window, cx)
+                project_dialog::open_new_project(this.model.clone(), window, cx)
             }))
             .when_some(selected, |this, (slug, archived)| {
-                let workspace = self.workspace.clone();
-                let (edit_ws, edit_slug) = (workspace.clone(), slug.clone());
-                let (delete_ws, delete_slug) = (workspace.clone(), slug.clone());
+                let model = self.model.clone();
+                let (edit_ws, edit_slug) = (model.clone(), slug.clone());
+                let (delete_ws, delete_slug) = (model.clone(), slug.clone());
                 this.on_action(move |_: &EditProject, window, cx| {
                     project_dialog::open_edit_project(
                         edit_ws.clone(),
@@ -156,11 +156,11 @@ impl Render for Shell {
                 .map(|this| {
                     if archived {
                         this.on_action(move |_: &UnarchiveProject, window, cx| {
-                            project_dialog::set_archived(&workspace, &slug, false, window, cx)
+                            project_dialog::set_archived(&model, &slug, false, window, cx)
                         })
                     } else {
                         this.on_action(move |_: &ArchiveProject, window, cx| {
-                            project_dialog::set_archived(&workspace, &slug, true, window, cx)
+                            project_dialog::set_archived(&model, &slug, true, window, cx)
                         })
                     }
                 })
@@ -173,7 +173,7 @@ impl Render for Shell {
                     .flex_1()
                     .min_h_0()
                     .items_stretch()
-                    .child(Nav::new(self.workspace.clone()))
+                    .child(Nav::new(self.model.clone()))
                     .child(self.center.clone()),
             )
     }

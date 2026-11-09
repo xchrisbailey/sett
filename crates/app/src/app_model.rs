@@ -26,7 +26,7 @@ impl Default for Selection {
 /// The open data root and the active Space: its index, kept current by a
 /// watcher, and each Space's last selection. Only the active Space is indexed
 /// and watched, so nothing from the other Space is held (ADR 0002).
-pub struct Workspace {
+pub struct AppModel {
     store: Store,
     settings: Settings,
     settings_path: Option<PathBuf>,
@@ -43,7 +43,7 @@ struct Watching {
     _task: Task<()>,
 }
 
-impl Workspace {
+impl AppModel {
     /// Opens the data root from `settings` (running first-run setup if
     /// needed) in the last used Space. `settings_path` is where the last
     /// Space is saved; `None` skips saving.
@@ -51,20 +51,20 @@ impl Workspace {
         settings: Settings,
         settings_path: Option<PathBuf>,
         cx: &mut App,
-    ) -> io::Result<Entity<Workspace>> {
-        Workspace::open_with(settings, settings_path, true, cx)
+    ) -> io::Result<Entity<AppModel>> {
+        AppModel::open_with(settings, settings_path, true, cx)
     }
 
-    /// Like [`Workspace::open`] but without watching the data root, for when
+    /// Like [`AppModel::open`] but without watching the data root, for when
     /// the caller reports outside changes itself through
-    /// [`Workspace::apply_change`]. GPUI's test executor rejects wakeups from
+    /// [`AppModel::apply_change`]. GPUI's test executor rejects wakeups from
     /// the watcher's thread, so UI tests use this.
     pub fn open_unwatched(
         settings: Settings,
         settings_path: Option<PathBuf>,
         cx: &mut App,
-    ) -> io::Result<Entity<Workspace>> {
-        Workspace::open_with(settings, settings_path, false, cx)
+    ) -> io::Result<Entity<AppModel>> {
+        AppModel::open_with(settings, settings_path, false, cx)
     }
 
     fn open_with(
@@ -72,13 +72,13 @@ impl Workspace {
         settings_path: Option<PathBuf>,
         watched: bool,
         cx: &mut App,
-    ) -> io::Result<Entity<Workspace>> {
+    ) -> io::Result<Entity<AppModel>> {
         let store = Store::open(&settings.data_root)?;
         Ok(cx.new(|cx| {
             let space = settings.last_space;
             let watching = watched.then(|| watch(&store, space, cx)).flatten();
             let index = SpaceIndex::scan(&store, space);
-            Workspace {
+            AppModel {
                 store,
                 settings,
                 settings_path,
@@ -130,7 +130,7 @@ impl Workspace {
         cx.notify();
     }
 
-    /// The Item [`Workspace::open_item`] asked for, if not yet opened.
+    /// The Item [`AppModel::open_item`] asked for, if not yet opened.
     pub(crate) fn take_opening(&mut self) -> Option<ItemId> {
         self.opening.take()
     }
@@ -438,7 +438,7 @@ impl Workspace {
         result
     }
 
-    /// Like [`Workspace::reload_project`], for just the Tasks written.
+    /// Like [`AppModel::reload_project`], for just the Tasks written.
     fn reload(&mut self, changes: Vec<Change>, cx: &mut Context<Self>) {
         for change in changes {
             self.apply_change(change, cx);
@@ -503,7 +503,7 @@ fn task_change(project: &str, slug: &str) -> Change {
 /// Starts watching `space` and applies each outside change to the index on
 /// the foreground. Without a watcher the Space still works; it just won't
 /// pick up outside edits until it is reopened.
-fn watch(store: &Store, space: Space, cx: &mut Context<Workspace>) -> Option<Watching> {
+fn watch(store: &Store, space: Space, cx: &mut Context<AppModel>) -> Option<Watching> {
     let watcher = match store.watch(space) {
         Ok(watcher) => watcher,
         Err(err) => {
@@ -514,9 +514,9 @@ fn watch(store: &Store, space: Space, cx: &mut Context<Workspace>) -> Option<Wat
     let events = watcher.events();
     let task = cx.spawn(async move |this, cx| {
         while let Ok(change) = events.recv().await {
-            let applied = this.update(cx, |workspace, cx| {
-                if workspace.space() == space {
-                    workspace.apply_change(change, cx);
+            let applied = this.update(cx, |model, cx| {
+                if model.space() == space {
+                    model.apply_change(change, cx);
                 }
             });
             if applied.is_err() {

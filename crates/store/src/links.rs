@@ -63,7 +63,7 @@ pub struct Link {
 
 /// An Item whose body links to another.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Backlink {
+pub struct InboundLink {
     pub source: ItemId,
     /// The Link's slug is shared by several Items, so the source may have
     /// meant another one.
@@ -71,7 +71,7 @@ pub struct Backlink {
 }
 
 /// The Link graph of one Space. Each Item's outgoing slugs are parsed when
-/// that Item changes; resolution and backlinks are derived from them.
+/// that Item changes; resolution and inbound Links are derived from them.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct LinkGraph {
     /// Every Item by the slug a Link names it with.
@@ -139,7 +139,7 @@ impl LinkGraph {
 
     /// Sources sorted the same way a duplicated slug is resolved. An Item's
     /// Links to itself aren't listed.
-    pub(crate) fn backlinks(&self, item: &ItemId) -> Vec<Backlink> {
+    pub(crate) fn inbound_links(&self, item: &ItemId) -> Vec<InboundLink> {
         let slug = item.slug();
         let LinkTarget::Found {
             item: resolved,
@@ -151,13 +151,13 @@ impl LinkGraph {
         if &resolved != item {
             return Vec::new();
         }
-        let mut sources: Vec<Backlink> = self
+        let mut sources: Vec<InboundLink> = self
             .incoming
             .get(&slug)
             .into_iter()
             .flatten()
             .filter(|source| *source != item)
-            .map(|source| Backlink {
+            .map(|source| InboundLink {
                 source: source.clone(),
                 ambiguous,
             })

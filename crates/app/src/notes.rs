@@ -15,8 +15,8 @@ use gpui_kit::{
 };
 use sett_store::{Note, Space};
 
+use crate::app_model::{AppModel, Selection};
 use crate::item_editor::{ItemEditor, ItemRef};
-use crate::workspace::{Selection, Workspace};
 
 /// Which Notes a list shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,7 +30,7 @@ pub(crate) enum NotesScope {
 /// A flat list of Notes, most recently edited first, beside the editor for
 /// the one open.
 pub(crate) struct NotesView {
-    workspace: Entity<Workspace>,
+    model: Entity<AppModel>,
     scope: NotesScope,
     /// What the list shows: the Space, and the Project or `None` for
     /// Space-level Notes. Changing it closes the open Note.
@@ -41,17 +41,15 @@ pub(crate) struct NotesView {
 
 impl NotesView {
     pub(crate) fn new(
-        workspace: Entity<Workspace>,
+        model: Entity<AppModel>,
         scope: NotesScope,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let editor = cx.new(|cx| ItemEditor::new(workspace.clone(), window, cx));
-        let observe = cx.observe_in(&workspace, window, |this, _, window, cx| {
-            this.sync(window, cx)
-        });
+        let editor = cx.new(|cx| ItemEditor::new(model.clone(), window, cx));
+        let observe = cx.observe_in(&model, window, |this, _, window, cx| this.sync(window, cx));
         let mut view = NotesView {
-            workspace,
+            model,
             scope,
             shown: None,
             editor,
@@ -68,9 +66,9 @@ impl NotesView {
     }
 
     fn sync(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let workspace = self.workspace.read(cx);
-        let space = workspace.space();
-        let shown = match (self.scope, workspace.selection()) {
+        let model = self.model.read(cx);
+        let space = model.space();
+        let shown = match (self.scope, model.selection()) {
             (NotesScope::Space, _) => Some((space, None)),
             (NotesScope::SelectedProject, Selection::Project(slug)) => Some((space, Some(slug))),
             (NotesScope::SelectedProject, _) => None,
@@ -106,7 +104,7 @@ impl NotesView {
 
     fn create_note(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let project = self.project().map(str::to_string);
-        let result = self.workspace.update(cx, |w, cx| {
+        let result = self.model.update(cx, |w, cx| {
             w.create_note(project.as_deref(), "Untitled", cx)
         });
         match result {
@@ -154,7 +152,7 @@ impl NotesView {
             }
         });
         let result = self
-            .workspace
+            .model
             .update(cx, |w, cx| w.trash_note(project.as_deref(), slug, cx));
         if let Err(err) = result {
             show_error("Couldn\u{2019}t delete the Note", err, window, cx);
@@ -203,7 +201,7 @@ impl NotesView {
             _ => None,
         };
         let mut notes: Vec<Note> = self
-            .workspace
+            .model
             .read(cx)
             .index()
             .notes(self.project())

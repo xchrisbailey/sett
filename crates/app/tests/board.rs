@@ -10,7 +10,7 @@ use gpui_kit::{
     AnyWindowHandle, AppContext, Bounds, Entity, TestAppContext, WindowBounds, WindowOptions, px,
     size,
 };
-use sett::{Shell, Workspace};
+use sett::{AppModel, Shell};
 use sett_store::{Change, Settings};
 
 struct Fixture {
@@ -27,18 +27,18 @@ fn open_board(cx: &mut TestAppContext, tasks: &[(&str, &str, f64, Option<String>
     let settings = Settings::defaults(dir.path());
     let tasks_dir = settings.data_root.join("personal/projects/inbox/tasks");
     // Store::open runs first-run setup only for a missing root, so create it
-    // through the Workspace first and add the Tasks afterwards.
+    // through the AppModel first and add the Tasks afterwards.
     cx.update(|cx| {
         gpui_kit::init(cx);
         sett::init(cx);
     });
-    let workspace = cx.update(|cx| Workspace::open_unwatched(settings, None, cx).unwrap());
+    let model = cx.update(|cx| AppModel::open_unwatched(settings, None, cx).unwrap());
     fs::create_dir_all(&tasks_dir).unwrap();
     for (slug, column, order, done) in tasks {
         write_task(&tasks_dir, slug, column, *order, done.as_deref());
     }
     cx.update(|cx| {
-        workspace.update(cx, |w, cx| {
+        model.update(cx, |w, cx| {
             w.apply_change(Change::Project("inbox".into()), cx)
         })
     });
@@ -52,7 +52,7 @@ fn open_board(cx: &mut TestAppContext, tasks: &[(&str, &str, f64, Option<String>
                 ..Default::default()
             },
             cx,
-            |window, cx| cx.new(|cx| Shell::new(workspace, window, cx)),
+            |window, cx| cx.new(|cx| Shell::new(model, window, cx)),
         )
         .unwrap()
     });
@@ -78,8 +78,8 @@ fn days_ago(days: u64) -> String {
     date.format("%Y-%m-%d").to_string()
 }
 
-fn workspace(cx: &mut TestAppContext, f: &Fixture) -> Entity<Workspace> {
-    cx.update(|cx| f.shell.read(cx).workspace().clone())
+fn model(cx: &mut TestAppContext, f: &Fixture) -> Entity<AppModel> {
+    cx.update(|cx| f.shell.read(cx).model().clone())
 }
 
 #[gpui_kit::test]
@@ -130,8 +130,8 @@ fn moving_a_card_rewrites_only_that_tasks_file(cx: &mut TestAppContext) {
         .map(|s| fs::read_to_string(f.tasks_dir.join(format!("{s}.md"))).unwrap())
         .collect();
 
-    let workspace = workspace(cx, &f);
-    cx.update(|cx| workspace.update(cx, |w, cx| w.move_task("inbox", "c", "Todo", Some("b"), cx)))
+    let model = model(cx, &f);
+    cx.update(|cx| model.update(cx, |w, cx| w.move_task("inbox", "c", "Todo", Some("b"), cx)))
         .unwrap();
     cx.run_until_parked();
 

@@ -5,20 +5,20 @@ use gpui_kit::component::{Icon, IconName, Sizable as _};
 use gpui_kit::{App, Entity, IntoElement, RenderOnce, SharedString, Window};
 use sett_store::Project;
 
+use crate::app_model::{AppModel, Selection};
 use crate::icons::project_icon;
 use crate::project_dialog;
-use crate::workspace::{Selection, Workspace};
 
 /// The left nav for the active Space: Journal and Notes, then the Projects
 /// (Inbox first), then archived Projects in a folded group at the bottom.
 #[derive(IntoElement)]
 pub(crate) struct Nav {
-    workspace: Entity<Workspace>,
+    model: Entity<AppModel>,
 }
 
 impl Nav {
-    pub(crate) fn new(workspace: Entity<Workspace>) -> Self {
-        Nav { workspace }
+    pub(crate) fn new(model: Entity<AppModel>) -> Self {
+        Nav { model }
     }
 
     fn item(
@@ -28,12 +28,12 @@ impl Nav {
         target: Selection,
         current: &Selection,
     ) -> SidebarMenuItem {
-        let workspace = self.workspace.clone();
+        let model = self.model.clone();
         SidebarMenuItem::new(label)
             .icon(icon)
             .active(*current == target)
             .on_click(move |_, _, cx| {
-                workspace.update(cx, |workspace, cx| workspace.select(target.clone(), cx));
+                model.update(cx, |model, cx| model.select(target.clone(), cx));
             })
     }
 
@@ -48,13 +48,13 @@ impl Nav {
         if project.is_inbox() {
             return item;
         }
-        let workspace = self.workspace.clone();
+        let model = self.model.clone();
         let slug = project.slug.clone();
         let archived = project.archived;
         item.context_menu(move |menu, _, _| {
-            let (edit_ws, edit_slug) = (workspace.clone(), slug.clone());
-            let (archive_ws, archive_slug) = (workspace.clone(), slug.clone());
-            let (delete_ws, delete_slug) = (workspace.clone(), slug.clone());
+            let (edit_ws, edit_slug) = (model.clone(), slug.clone());
+            let (archive_ws, archive_slug) = (model.clone(), slug.clone());
+            let (delete_ws, delete_slug) = (model.clone(), slug.clone());
             menu.item(
                 PopupMenuItem::new("Edit\u{2026}").on_click(move |_, window, cx| {
                     project_dialog::open_edit_project(
@@ -95,15 +95,15 @@ impl Nav {
 
 impl RenderOnce for Nav {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let workspace = self.workspace.read(cx);
-        let current = workspace.selection();
-        let (archived, active): (Vec<&Project>, Vec<&Project>) = workspace
+        let model = self.model.read(cx);
+        let current = model.selection();
+        let (archived, active): (Vec<&Project>, Vec<&Project>) = model
             .index()
             .projects()
             .into_iter()
             .partition(|p| p.archived);
 
-        let workspace = self.workspace.clone();
+        let model = self.model.clone();
         let mut sidebar = Sidebar::new("nav")
             .collapsible(false)
             .footer(
@@ -113,7 +113,7 @@ impl RenderOnce for Nav {
                     .icon(IconName::Plus)
                     .label("New project\u{2026}")
                     .on_click(move |_, window, cx| {
-                        project_dialog::open_new_project(workspace.clone(), window, cx)
+                        project_dialog::open_new_project(model.clone(), window, cx)
                     }),
             )
             .child(

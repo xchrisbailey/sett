@@ -28,7 +28,7 @@ pub use date::Date;
 use frontmatter::Document;
 pub use index::{Change, SpaceIndex, Update};
 pub use item::{JournalEntry, Note, RECENT_DONE_DAYS, Task};
-pub use links::{Backlink, ItemId, Link, LinkTarget};
+pub use links::{InboundLink, ItemId, Link, LinkTarget};
 pub use settings::{EditorMode, Settings};
 pub use watch::Watcher;
 use watch::WriteLog;

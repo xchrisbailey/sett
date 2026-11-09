@@ -49,8 +49,8 @@ fn switching_space_by_toggle_and_shortcut_remembers_last_space(cx: &mut TestAppC
     .unwrap();
 
     cx.update(|cx| {
-        let workspace = f.shell.read(cx).workspace().clone();
-        assert_eq!(workspace.read(cx).space(), Space::Work);
+        let model = f.shell.read(cx).model().clone();
+        assert_eq!(model.read(cx).space(), Space::Work);
     });
 }
 
@@ -115,7 +115,7 @@ fn nav_follows_projects_added_and_removed_on_disk(cx: &mut TestAppContext) {
 /// Reports a change the way the watcher does.
 fn apply_change(cx: &mut TestAppContext, f: &Fixture, change: Change) {
     cx.update(|cx| {
-        let workspace = f.shell.read(cx).workspace().clone();
-        workspace.update(cx, |workspace, cx| workspace.apply_change(change, cx));
+        let model = f.shell.read(cx).model().clone();
+        model.update(cx, |model, cx| model.apply_change(change, cx));
     });
 }

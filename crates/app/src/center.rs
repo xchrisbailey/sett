@@ -9,11 +9,11 @@ use gpui_kit::{
 
 use sett_store::{ItemId, Space};
 
+use crate::app_model::{AppModel, Selection, today};
 use crate::board::{BoardEvent, BoardView};
 use crate::item_editor::{ItemEditor, ItemRef};
 use crate::notes::{NotesScope, NotesView};
 use crate::task_view::{TaskView, TaskViewEvent};
-use crate::workspace::{Selection, Workspace, today};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 enum ProjectTab {
@@ -25,7 +25,7 @@ enum ProjectTab {
 /// Shows whatever the nav has selected: today's Journal Entry, the Notes
 /// list, or a Project's Board (or one of its Tasks) or Notes.
 pub(crate) struct CenterPanel {
-    workspace: Entity<Workspace>,
+    model: Entity<AppModel>,
     board: Entity<BoardView>,
     /// Shown in place of the Board while a Task is open.
     task: Entity<TaskView>,
@@ -40,16 +40,16 @@ pub(crate) struct CenterPanel {
 
 impl CenterPanel {
     pub(crate) fn new(
-        workspace: Entity<Workspace>,
+        model: Entity<AppModel>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let observe = cx.observe_in(&workspace, window, |this, _, window, cx| {
+        let observe = cx.observe_in(&model, window, |this, _, window, cx| {
             this.sync(window, cx);
             cx.notify();
         });
-        let board = cx.new(|cx| BoardView::new(workspace.clone(), window, cx));
-        let task = cx.new(|cx| TaskView::new(workspace.clone(), window, cx));
+        let board = cx.new(|cx| BoardView::new(model.clone(), window, cx));
+        let task = cx.new(|cx| TaskView::new(model.clone(), window, cx));
         let subscriptions = vec![
             observe,
             cx.subscribe_in(&board, window, |this, _, event, window, cx| {
@@ -65,12 +65,12 @@ impl CenterPanel {
                 cx.notify();
             }),
         ];
-        let notes = cx.new(|cx| NotesView::new(workspace.clone(), NotesScope::Space, window, cx));
+        let notes = cx.new(|cx| NotesView::new(model.clone(), NotesScope::Space, window, cx));
         let project_notes =
-            cx.new(|cx| NotesView::new(workspace.clone(), NotesScope::SelectedProject, window, cx));
-        let journal = cx.new(|cx| ItemEditor::new(workspace.clone(), window, cx));
+            cx.new(|cx| NotesView::new(model.clone(), NotesScope::SelectedProject, window, cx));
+        let journal = cx.new(|cx| ItemEditor::new(model.clone(), window, cx));
         let mut panel = CenterPanel {
-            workspace,
+            model,
             board,
             task,
             notes,
@@ -87,7 +87,7 @@ impl CenterPanel {
     /// Saves pending edits in whatever was just hidden, and opens today's
     /// Journal Entry when the Journal is shown.
     fn sync(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let opening = self.workspace.update(cx, |w, _| w.take_opening());
+        let opening = self.model.update(cx, |w, _| w.take_opening());
         match &opening {
             Some(ItemId::Task { .. }) => self.project_tab = ProjectTab::Board,
             Some(ItemId::Note {
@@ -95,8 +95,8 @@ impl CenterPanel {
             }) => self.project_tab = ProjectTab::Notes,
             _ => {}
         }
-        let workspace = self.workspace.read(cx);
-        let (space, selection) = (workspace.space(), workspace.selection());
+        let model = self.model.read(cx);
+        let (space, selection) = (model.space(), model.selection());
         let shown = Some((selection.clone(), self.project_tab));
         if shown != self.shown {
             self.shown = shown;
@@ -120,7 +120,7 @@ impl CenterPanel {
         }
     }
 
-    /// Opens an Item the Workspace was asked to open, once its view is the
+    /// Opens an Item the AppModel was asked to open, once its view is the
     /// one selected.
     fn reveal(&mut self, item: ItemId, space: Space, window: &mut Window, cx: &mut Context<Self>) {
         match item {
@@ -247,15 +247,15 @@ impl CenterPanel {
 
 impl Render for CenterPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let workspace = self.workspace.read(cx);
-        let content = match workspace.selection() {
+        let model = self.model.read(cx);
+        let content = match model.selection() {
             Selection::Journal => {
                 self.render_page("Journal", self.journal.clone().into_any_element(), cx)
             }
             Selection::Notes => {
                 self.render_page("Notes", self.notes.clone().into_any_element(), cx)
             }
-            Selection::Project(slug) => match workspace.index().project(&slug) {
+            Selection::Project(slug) => match model.index().project(&slug) {
                 Some(project) => {
                     let name = SharedString::from(project.name.clone());
                     self.render_project(name, cx)

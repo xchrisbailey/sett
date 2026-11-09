@@ -12,7 +12,7 @@ use gpui_kit::{
     AnyWindowHandle, AppContext, Bounds, MouseButton, TestAppContext, WindowBounds, WindowOptions,
     point, px, size,
 };
-use sett::{Shell, Workspace};
+use sett::{AppModel, Shell};
 use sett_store::{Change, Settings};
 
 struct Fixture {
@@ -31,7 +31,7 @@ fn open_board(cx: &mut TestAppContext, tasks: &[(&str, &str, f64, &str)]) -> Fix
         gpui_kit::init(cx);
         sett::init(cx);
     });
-    let workspace = cx.update(|cx| Workspace::open_unwatched(settings, None, cx).unwrap());
+    let model = cx.update(|cx| AppModel::open_unwatched(settings, None, cx).unwrap());
     fs::create_dir_all(&tasks_dir).unwrap();
     for (slug, column, order, extra) in tasks {
         // A YAML comment never survives a rewrite by sett, so it marks a file
@@ -42,7 +42,7 @@ fn open_board(cx: &mut TestAppContext, tasks: &[(&str, &str, f64, &str)]) -> Fix
         fs::write(tasks_dir.join(format!("{slug}.md")), text).unwrap();
     }
     cx.update(|cx| {
-        workspace.update(cx, |w, cx| {
+        model.update(cx, |w, cx| {
             w.apply_change(Change::Project("inbox".into()), cx)
         })
     });
@@ -56,7 +56,7 @@ fn open_board(cx: &mut TestAppContext, tasks: &[(&str, &str, f64, &str)]) -> Fix
                 ..Default::default()
             },
             cx,
-            |window, cx| cx.new(|cx| Shell::new(workspace, window, cx)),
+            |window, cx| cx.new(|cx| Shell::new(model, window, cx)),
         )
         .unwrap()
     });

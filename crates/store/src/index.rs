@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::links::{Backlink, ItemId, Link, LinkGraph, LinkTarget};
+use crate::links::{InboundLink, ItemId, Link, LinkGraph, LinkTarget};
 use crate::{Date, JournalEntry, Note, Project, Space, Store, Task};
 
 /// Something in a Space that may have changed on disk. Applying a `Change`
@@ -258,8 +258,8 @@ impl SpaceIndex {
 
     /// The Items whose Links resolve to `item`. An Item that only shares a
     /// duplicated slug but isn't the one it resolves to has none.
-    pub fn backlinks(&self, item: &ItemId) -> Vec<Backlink> {
-        self.links.backlinks(item)
+    pub fn inbound_links(&self, item: &ItemId) -> Vec<InboundLink> {
+        self.links.inbound_links(item)
     }
 
     /// A Note's or Task's title, or a Journal Entry's date.

@@ -36,9 +36,9 @@ fn snapshot(path: &Path) -> (Vec<u8>, SystemTime) {
 fn with_note(cx: &mut TestAppContext, f: &Fixture, slug: &str, text: &str) -> PathBuf {
     let path = f.data_root.join(format!("personal/notes/{slug}.md"));
     fs::write(&path, text).unwrap();
-    let workspace = f.workspace(cx);
+    let model = f.model(cx);
     cx.update(|cx| {
-        workspace.update(cx, |w, cx| {
+        model.update(cx, |w, cx| {
             w.apply_change(note_change(slug), cx);
             w.select(Selection::Notes, cx);
         })
@@ -159,8 +159,8 @@ fn open_note(cx: &mut TestAppContext, f: &Fixture, slug: &str) {
 /// Rewrites the file as an agent would and reports it as the watcher would.
 fn change_outside(cx: &mut TestAppContext, f: &Fixture, path: &Path, text: &str) {
     fs::write(path, text).unwrap();
-    let workspace = f.workspace(cx);
-    cx.update(|cx| workspace.update(cx, |w, cx| w.apply_change(note_change("plan"), cx)));
+    let model = f.model(cx);
+    cx.update(|cx| model.update(cx, |w, cx| w.apply_change(note_change("plan"), cx)));
     cx.run_until_parked();
 }
 
@@ -333,8 +333,8 @@ fn notes_are_listed_most_recently_edited_first(cx: &mut TestAppContext) {
     fs::write(&older, "---\ntitle: Older\n---\nOld\n").unwrap();
     set_mtime(&older, 3600);
     with_note(cx, &f, "newer", "---\ntitle: Newer\n---\nNew\n");
-    let workspace = f.workspace(cx);
-    cx.update(|cx| workspace.update(cx, |w, cx| w.apply_change(note_change("older"), cx)));
+    let model = f.model(cx);
+    cx.update(|cx| model.update(cx, |w, cx| w.apply_change(note_change("older"), cx)));
     assert_eq!(listed(cx, &f), ["Newer", "Older"]);
 
     open_note(cx, &f, "older");
@@ -346,8 +346,8 @@ fn notes_are_listed_most_recently_edited_first(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn a_new_note_starts_untitled_and_keeps_its_slug_when_renamed(cx: &mut TestAppContext) {
     let f = open_shell(cx);
-    let workspace = f.workspace(cx);
-    cx.update(|cx| workspace.update(cx, |w, cx| w.select(Selection::Notes, cx)));
+    let model = f.model(cx);
+    cx.update(|cx| model.update(cx, |w, cx| w.select(Selection::Notes, cx)));
 
     cx.update_window(f.window, |_, window, cx| {
         window.render_frame(cx);
@@ -378,9 +378,9 @@ fn a_new_note_starts_untitled_and_keeps_its_slug_when_renamed(cx: &mut TestAppCo
 #[gpui_kit::test]
 fn deleting_a_note_confirms_then_trashes_it(cx: &mut TestAppContext) {
     let f = open_shell(cx);
-    let workspace = f.workspace(cx);
+    let model = f.model(cx);
     // Stands in for the macOS Trash, which these tests must not touch.
-    cx.update(|cx| workspace.update(cx, |w, _| w.set_trash(|path| fs::remove_file(path))));
+    cx.update(|cx| model.update(cx, |w, _| w.set_trash(|path| fs::remove_file(path))));
     let path = with_note(cx, &f, "plan", "---\ntitle: Plan\n---\nBody\n");
     open_note(cx, &f, "plan");
 
@@ -415,14 +415,14 @@ fn deleting_a_note_confirms_then_trashes_it(cx: &mut TestAppContext) {
 fn a_projects_notes_tab_lists_only_its_notes(cx: &mut TestAppContext) {
     let f = open_shell(cx);
     with_note(cx, &f, "plan", "---\ntitle: Plan\n---\n");
-    let workspace = f.workspace(cx);
+    let model = f.model(cx);
     cx.update(|cx| {
-        workspace.update(cx, |w, cx| w.create_project("Website", None, cx).unwrap());
+        model.update(cx, |w, cx| w.create_project("Website", None, cx).unwrap());
     });
     let notes = f.data_root.join("personal/projects/website/notes");
     fs::write(notes.join("spec.md"), "---\ntitle: Spec\n---\n").unwrap();
     cx.update(|cx| {
-        workspace.update(cx, |w, cx| {
+        model.update(cx, |w, cx| {
             w.apply_change(Change::Project("website".into()), cx)
         })
     });

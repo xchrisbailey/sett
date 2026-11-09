@@ -9,7 +9,7 @@ use gpui_kit::{
     AnyWindowHandle, AppContext, Bounds, Entity, MouseButton, TestAppContext, Window, WindowBounds,
     WindowOptions, px, size,
 };
-use sett::{Shell, Workspace};
+use sett::{AppModel, Shell};
 use sett_store::Settings;
 
 pub struct Fixture {
@@ -21,8 +21,8 @@ pub struct Fixture {
 }
 
 impl Fixture {
-    pub fn workspace(&self, cx: &mut TestAppContext) -> Entity<Workspace> {
-        cx.update(|cx| self.shell.read(cx).workspace().clone())
+    pub fn model(&self, cx: &mut TestAppContext) -> Entity<AppModel> {
+        cx.update(|cx| self.shell.read(cx).model().clone())
     }
 }
 
@@ -36,8 +36,7 @@ pub fn open_shell(cx: &mut TestAppContext) -> Fixture {
         sett::init(cx);
     });
     let (window, shell) = cx.update(|cx| {
-        let workspace =
-            Workspace::open_unwatched(settings, Some(settings_path.clone()), cx).unwrap();
+        let model = AppModel::open_unwatched(settings, Some(settings_path.clone()), cx).unwrap();
         gpui_kit::open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(Bounds::new(
@@ -47,7 +46,7 @@ pub fn open_shell(cx: &mut TestAppContext) -> Fixture {
                 ..Default::default()
             },
             cx,
-            |window, cx| cx.new(|cx| Shell::new(workspace, window, cx)),
+            |window, cx| cx.new(|cx| Shell::new(model, window, cx)),
         )
         .unwrap()
     });

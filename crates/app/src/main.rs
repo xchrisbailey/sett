@@ -3,8 +3,8 @@ use std::path::Path;
 use gpui_kit::component::TitleBar;
 use gpui_kit::*;
 use sett::{
-    ArchiveProject, DeleteProject, EditProject, NewProject, Shell, ShowPersonal, ShowWork,
-    ToggleEditorMode, UnarchiveProject, Workspace,
+    AppModel, ArchiveProject, DeleteProject, EditProject, NewProject, Shell, ShowPersonal,
+    ShowWork, ToggleEditorMode, UnarchiveProject,
 };
 use sett_store::Settings;
 
@@ -44,8 +44,8 @@ fn main() {
         ]);
 
         let data_root = settings.data_root.clone();
-        let workspace = match Workspace::open(settings.clone(), settings_path.clone(), cx) {
-            Ok(workspace) => workspace,
+        let model = match AppModel::open(settings.clone(), settings_path.clone(), cx) {
+            Ok(model) => model,
             Err(err) => {
                 eprintln!("sett: couldn't open {}: {err}", data_root.display());
                 cx.quit();
@@ -59,7 +59,7 @@ fn main() {
             ..TitleBar::window_options()
         };
         open_window(options, cx, |window, cx| {
-            cx.new(|cx| Shell::new(workspace, window, cx))
+            cx.new(|cx| Shell::new(model, window, cx))
         })
         .expect("failed to open window");
         cx.activate(true);

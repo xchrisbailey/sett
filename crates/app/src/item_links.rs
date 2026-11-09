@@ -7,21 +7,21 @@ use gpui_kit::{
 };
 use sett_store::{ItemId, LinkTarget, SpaceIndex};
 
+use crate::app_model::AppModel;
 use crate::item_editor::ItemRef;
-use crate::workspace::Workspace;
 
 /// What sits under an Item's body: the Items linking to it ("Linked from")
 /// and its own Links, each opening its Item. Broken Links show but can't be
 /// followed; a Link whose slug several Items share is marked ambiguous.
 #[derive(IntoElement)]
 pub(crate) struct ItemLinks {
-    workspace: Entity<Workspace>,
+    model: Entity<AppModel>,
     item: ItemId,
 }
 
 impl ItemLinks {
-    pub(crate) fn new(workspace: Entity<Workspace>, item: ItemId) -> Self {
-        ItemLinks { workspace, item }
+    pub(crate) fn new(model: Entity<AppModel>, item: ItemId) -> Self {
+        ItemLinks { model, item }
     }
 }
 
@@ -38,9 +38,9 @@ enum Row {
 
 impl RenderOnce for ItemLinks {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let index = self.workspace.read(cx).index();
-        let backlinks: Vec<Row> = index
-            .backlinks(&self.item)
+        let index = self.model.read(cx).index();
+        let inbound_links: Vec<Row> = index
+            .inbound_links(&self.item)
             .into_iter()
             .map(|b| item_row(index, b.source, b.ambiguous))
             .collect();
@@ -53,7 +53,7 @@ impl RenderOnce for ItemLinks {
                 LinkTarget::Broken => Some(Row::Broken(link.slug.into())),
             })
             .collect();
-        if backlinks.is_empty() && links.is_empty() {
+        if inbound_links.is_empty() && links.is_empty() {
             return div().into_any_element();
         }
         let theme = cx.theme();
@@ -68,19 +68,13 @@ impl RenderOnce for ItemLinks {
             .border_t_1()
             .border_color(theme.border)
             .children(section(
-                "backlinks",
+                "inbound-links",
                 "Linked from",
-                backlinks,
-                &self.workspace,
+                inbound_links,
+                &self.model,
                 cx,
             ))
-            .children(section(
-                "outgoing-links",
-                "Links",
-                links,
-                &self.workspace,
-                cx,
-            ))
+            .children(section("outgoing-links", "Links", links, &self.model, cx))
             .into_any_element()
     }
 }
@@ -112,7 +106,7 @@ fn section(
     id: &'static str,
     heading: &'static str,
     rows: Vec<Row>,
-    workspace: &Entity<Workspace>,
+    model: &Entity<AppModel>,
     cx: &App,
 ) -> Option<AnyElement> {
     if rows.is_empty() {
@@ -121,7 +115,7 @@ fn section(
     let muted = cx.theme().muted_foreground;
     let rows: Vec<AnyElement> = rows
         .into_iter()
-        .map(|row| render_row(id, row, workspace, cx))
+        .map(|row| render_row(id, row, model, cx))
         .collect();
     Some(
         v_flex()
@@ -144,7 +138,7 @@ fn section(
     )
 }
 
-fn render_row(section: &str, row: Row, workspace: &Entity<Workspace>, cx: &App) -> AnyElement {
+fn render_row(section: &str, row: Row, model: &Entity<AppModel>, cx: &App) -> AnyElement {
     let muted = cx.theme().muted_foreground;
     match row {
         Row::Item {
@@ -154,7 +148,7 @@ fn render_row(section: &str, row: Row, workspace: &Entity<Workspace>, cx: &App) 
             ambiguous,
         } => {
             let id = ElementId::Name(format!("{section}-{}", key(&item)).into());
-            let workspace = workspace.clone();
+            let model = model.clone();
             let detail = if ambiguous {
                 format!("{kind} \u{b7} ambiguous")
             } else {
@@ -166,7 +160,7 @@ fn render_row(section: &str, row: Row, workspace: &Entity<Workspace>, cx: &App) 
                 .label(title)
                 .child(div().text_color(muted).child(detail))
                 .on_click(move |_, _, cx| {
-                    workspace.update(cx, |w, cx| w.open_item(item.clone(), cx));
+                    model.update(cx, |w, cx| w.open_item(item.clone(), cx));
                 });
             if ambiguous {
                 button

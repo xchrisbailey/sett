@@ -1,4 +1,4 @@
-//! UI integration tests for the Links under an Item's body: the backlinks
+//! UI integration tests for the Links under an Item's body: the inbound Links
 //! list and following a Link from it.
 
 mod common;
@@ -15,8 +15,8 @@ fn write(cx: &mut TestAppContext, f: &Fixture, rel: &str, text: &str, change: Ch
     let path = f.data_root.join("personal").join(rel);
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(path, text).unwrap();
-    let workspace = f.workspace(cx);
-    cx.update(|cx| workspace.update(cx, |w, cx| w.apply_change(change, cx)));
+    let model = f.model(cx);
+    cx.update(|cx| model.update(cx, |w, cx| w.apply_change(change, cx)));
 }
 
 fn note(project: Option<&str>, slug: &str) -> Change {
@@ -45,17 +45,17 @@ fn labels(cx: &mut TestAppContext, f: &Fixture, list: &'static str) -> Vec<Strin
 }
 
 fn open_note(cx: &mut TestAppContext, f: &Fixture, project: Option<&str>, slug: &str) {
-    let workspace = f.workspace(cx);
+    let model = f.model(cx);
     let item = ItemId::Note {
         project: project.map(str::to_string),
         slug: slug.to_string(),
     };
-    cx.update(|cx| workspace.update(cx, |w, cx| w.open_item(item, cx)));
+    cx.update(|cx| model.update(cx, |w, cx| w.open_item(item, cx)));
     cx.run_until_parked();
 }
 
 #[gpui_kit::test]
-fn backlinks_show_under_the_body_and_open_their_item(cx: &mut TestAppContext) {
+fn inbound_links_show_under_the_body_and_open_their_item(cx: &mut TestAppContext) {
     let f = open_shell(cx);
     write(
         cx,
@@ -80,11 +80,11 @@ fn backlinks_show_under_the_body_and_open_their_item(cx: &mut TestAppContext) {
     );
     open_note(cx, &f, None, "plan");
 
-    assert_eq!(labels(cx, &f, "backlinks"), ["Ideas", "2026-11-02"]);
+    assert_eq!(labels(cx, &f, "inbound-links"), ["Ideas", "2026-11-02"]);
     assert!(labels(cx, &f, "outgoing-links").is_empty());
 
     cx.update_window(f.window, |_, window, cx| {
-        click_label(window, Some("backlinks"), "Ideas", cx);
+        click_label(window, Some("inbound-links"), "Ideas", cx);
     })
     .unwrap();
     cx.run_until_parked();
@@ -107,13 +107,13 @@ fn backlinks_show_under_the_body_and_open_their_item(cx: &mut TestAppContext) {
     .unwrap();
     cx.run_until_parked();
     cx.update_window(f.window, |_, window, cx| {
-        click_label(window, Some("backlinks"), "2026-11-02", cx);
+        click_label(window, Some("inbound-links"), "2026-11-02", cx);
     })
     .unwrap();
     cx.run_until_parked();
-    let workspace = f.workspace(cx);
+    let model = f.model(cx);
     assert_eq!(
-        cx.update(|cx| workspace.read(cx).selection()),
+        cx.update(|cx| model.read(cx).selection()),
         Selection::Journal
     );
     cx.update_window(f.window, |_, window, _| {
@@ -124,7 +124,7 @@ fn backlinks_show_under_the_body_and_open_their_item(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn a_backlink_from_a_project_note_opens_the_projects_notes(cx: &mut TestAppContext) {
+fn an_inbound_link_from_a_project_note_opens_the_projects_notes(cx: &mut TestAppContext) {
     let f = open_shell(cx);
     write(
         cx,
@@ -143,14 +143,14 @@ fn a_backlink_from_a_project_note_opens_the_projects_notes(cx: &mut TestAppConte
     open_note(cx, &f, None, "plan");
 
     cx.update_window(f.window, |_, window, cx| {
-        click_label(window, Some("backlinks"), "Spec", cx);
+        click_label(window, Some("inbound-links"), "Spec", cx);
     })
     .unwrap();
     cx.run_until_parked();
 
-    let workspace = f.workspace(cx);
+    let model = f.model(cx);
     assert_eq!(
-        cx.update(|cx| workspace.read(cx).selection()),
+        cx.update(|cx| model.read(cx).selection()),
         Selection::Project("inbox".into())
     );
     assert_eq!(labels(cx, &f, "outgoing-links"), ["Plan"]);

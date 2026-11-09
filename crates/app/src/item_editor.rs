@@ -13,8 +13,8 @@ use gpui_kit::{
 use markdown_editor::{BlockEditor, BlockEditorEvent, BlockEditorState};
 use sett_store::{Date, EditorMode, JournalEntry, Note, Space};
 
+use crate::app_model::AppModel;
 use crate::item_links::ItemLinks;
-use crate::workspace::Workspace;
 
 /// How long after the last keystroke an edit is written.
 const AUTOSAVE_DELAY: Duration = Duration::from_millis(500);
@@ -96,7 +96,7 @@ impl Version {
 /// sett-store. The file is written only after a real edit (ADR 0003): 500 ms
 /// after the last one, when another Item is opened, or when sett quits.
 pub(crate) struct ItemEditor {
-    workspace: Entity<Workspace>,
+    model: Entity<AppModel>,
     item: Option<ItemRef>,
     /// The file as last read or written, or `None` when there is no file
     /// (yet). An index version that differs from this changed outside sett.
@@ -120,7 +120,7 @@ pub(crate) struct ItemEditor {
 
 impl ItemEditor {
     pub(crate) fn new(
-        workspace: Entity<Workspace>,
+        model: Entity<AppModel>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -155,9 +155,7 @@ impl ItemEditor {
                     this.edited(window, cx);
                 }
             }),
-            cx.observe_in(&workspace, window, |this, _, window, cx| {
-                this.sync(window, cx)
-            }),
+            cx.observe_in(&model, window, |this, _, window, cx| this.sync(window, cx)),
             cx.on_app_quit(|this, cx| {
                 if let Err(err) = this.save(cx) {
                     eprintln!("sett: couldn't save on quit: {err}");
@@ -165,9 +163,9 @@ impl ItemEditor {
                 async {}
             }),
         ];
-        let mode = workspace.read(cx).editor_mode();
+        let mode = model.read(cx).editor_mode();
         ItemEditor {
-            workspace,
+            model,
             item: None,
             seen: None,
             base: None,
@@ -200,7 +198,7 @@ impl ItemEditor {
             return;
         }
         self.flush(window, cx);
-        self.mode = self.workspace.read(cx).editor_mode();
+        self.mode = self.model.read(cx).editor_mode();
         self.item = Some(item);
         let disk = self.disk_version(cx);
         match disk.clone().or_else(|| self.empty_version()) {
@@ -259,23 +257,23 @@ impl ItemEditor {
         let Some(base) = self.disk_version(cx).or_else(|| self.base.clone()) else {
             return Ok(());
         };
-        let workspace = self.workspace.clone();
+        let model = self.model.clone();
         let saved = match base {
             Version::Note(mut note) => {
                 note.title = self.title_or_untitled(cx);
                 note.body = self.body.clone();
-                workspace.update(cx, |w, cx| w.save_note(&mut note, cx))?;
+                model.update(cx, |w, cx| w.save_note(&mut note, cx))?;
                 Version::Note(note)
             }
             Version::Journal(mut entry) => {
                 entry.body = self.body.clone();
-                workspace.update(cx, |w, cx| w.save_journal_entry(&mut entry, cx))?;
+                model.update(cx, |w, cx| w.save_journal_entry(&mut entry, cx))?;
                 Version::Journal(entry)
             }
             Version::Task(mut task) => {
                 task.title = self.title_or_untitled(cx);
                 task.body = self.body.clone();
-                workspace.update(cx, |w, cx| w.save_task(&mut task, cx))?;
+                model.update(cx, |w, cx| w.save_task(&mut task, cx))?;
                 Version::Task(task)
             }
         };
@@ -295,19 +293,19 @@ impl ItemEditor {
         }
     }
 
-    /// Follows the Workspace: the editor mode, a Space switch, and outside
+    /// Follows the AppModel: the editor mode, a Space switch, and outside
     /// changes to the open Item.
     fn sync(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(item) = self.item.clone() else {
             return;
         };
-        let workspace = self.workspace.read(cx);
-        if workspace.space() != item.space() {
+        let model = self.model.read(cx);
+        if model.space() != item.space() {
             self.flush(window, cx);
             self.close(cx);
             return;
         }
-        let mode = workspace.editor_mode();
+        let mode = model.editor_mode();
         if mode != self.mode {
             self.set_mode(mode, window, cx);
         }
@@ -434,12 +432,12 @@ impl ItemEditor {
     }
 
     fn disk_version(&self, cx: &App) -> Option<Version> {
-        let workspace = self.workspace.read(cx);
+        let model = self.model.read(cx);
         let item = self.item.as_ref()?;
-        if workspace.space() != item.space() {
+        if model.space() != item.space() {
             return None;
         }
-        let index = workspace.index();
+        let index = model.index();
         match item {
             ItemRef::Note { project, slug, .. } => index
                 .note(project.as_deref(), slug)
@@ -559,7 +557,7 @@ impl Render for ItemEditor {
             .min_h_0()
             .child(header)
             .child(self.render_body(cx))
-            .child(ItemLinks::new(self.workspace.clone(), item.id()))
+            .child(ItemLinks::new(self.model.clone(), item.id()))
             .into_any_element()
     }
 }

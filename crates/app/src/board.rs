@@ -19,7 +19,7 @@ use gpui_kit::{
 };
 use sett_store::{Board, BoardColumn, Date, Task};
 
-use crate::workspace::{Selection, Workspace, today};
+use crate::app_model::{AppModel, Selection, today};
 
 actions!(sett, [OpenCard]);
 
@@ -38,7 +38,7 @@ pub enum BoardEvent {
 /// The selected Project's Board: its Columns side by side, each with a
 /// quick-add box and its Cards. Cards drag within and between Columns.
 pub(crate) struct BoardView {
-    workspace: Entity<Workspace>,
+    model: Entity<AppModel>,
     /// The Project shown, by slug. Changing it resets the view state below.
     project: Option<String>,
     show_all_done: bool,
@@ -86,15 +86,15 @@ impl EventEmitter<BoardEvent> for BoardView {}
 
 impl BoardView {
     pub(crate) fn new(
-        workspace: Entity<Workspace>,
+        model: Entity<AppModel>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let observe = cx.observe_in(&workspace, window, |this, _, window, cx| {
+        let observe = cx.observe_in(&model, window, |this, _, window, cx| {
             this.sync(window, cx);
         });
         let mut view = BoardView {
-            workspace,
+            model,
             project: None,
             show_all_done: false,
             selected_task: None,
@@ -107,23 +107,23 @@ impl BoardView {
         view
     }
 
-    /// Follows the Workspace's selection and keeps one quick-add box per
+    /// Follows the AppModel's selection and keeps one quick-add box per
     /// Column. Boxes are created here rather than in `render` because an
     /// `InputState` needs the window.
     fn sync(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let workspace = self.workspace.read(cx);
-        let project = match workspace.selection() {
+        let model = self.model.read(cx);
+        let project = match model.selection() {
             Selection::Project(slug) => Some(slug),
             _ => None,
         };
         let columns = project
             .as_deref()
-            .and_then(|p| workspace.index().project(p))
+            .and_then(|p| model.index().project(p))
             .map(|p| p.columns.clone())
             .unwrap_or_default();
         let slugs: Vec<String> = project
             .as_deref()
-            .map(|p| workspace.index().tasks(p))
+            .map(|p| model.index().tasks(p))
             .unwrap_or_default()
             .into_iter()
             .map(|t| t.slug.clone())
@@ -179,7 +179,7 @@ impl BoardView {
             return;
         }
         let result = self
-            .workspace
+            .model
             .update(cx, |w, cx| w.create_task(&project, column, &title, cx));
         match result {
             Ok(()) => input.update(cx, |input, cx| input.set_value("", window, cx)),
@@ -199,7 +199,7 @@ impl BoardView {
             return;
         };
         let result = self
-            .workspace
+            .model
             .update(cx, |w, cx| w.move_task(&project, slug, column, before, cx));
         if let Err(err) = result {
             show_error("Couldn't move the Task", err, window, cx);
@@ -237,12 +237,12 @@ impl BoardView {
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
-        edit: impl FnOnce(&mut Workspace, &str, &mut Context<Workspace>) -> io::Result<()>,
+        edit: impl FnOnce(&mut AppModel, &str, &mut Context<AppModel>) -> io::Result<()>,
     ) -> bool {
         let Some(project) = self.project.clone() else {
             return false;
         };
-        let result = self.workspace.update(cx, |w, cx| edit(w, &project, cx));
+        let result = self.model.update(cx, |w, cx| edit(w, &project, cx));
         match result {
             Ok(()) => true,
             Err(err) => {
@@ -587,15 +587,15 @@ enum ColumnAction {
 impl Render for BoardView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let today = today();
-        let workspace = self.workspace.read(cx);
+        let model = self.model.read(cx);
         let Some(project) = self
             .project
             .as_deref()
-            .and_then(|p| workspace.index().project(p))
+            .and_then(|p| model.index().project(p))
         else {
             return div().into_any_element();
         };
-        let board = Board::new(&project.columns, workspace.index().tasks(&project.slug));
+        let board = Board::new(&project.columns, model.index().tasks(&project.slug));
         let columns: Vec<AnyElement> = board
             .columns()
             .iter()
