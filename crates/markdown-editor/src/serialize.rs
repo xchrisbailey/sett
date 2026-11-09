@@ -70,7 +70,14 @@ fn block(doc: &EditorDocument, id: BlockId) -> String {
             })
             .collect::<Vec<_>>()
             .join("\n"),
-        (BlockKindData::List { ordered, start }, _) => {
+        (
+            BlockKindData::List {
+                ordered,
+                start,
+                marker,
+            },
+            _,
+        ) => {
             let loose = children.iter().any(|item| {
                 matches!(
                     doc.kind(*item),
@@ -81,12 +88,12 @@ fn block(doc: &EditorDocument, id: BlockId) -> String {
             // a paragraph reads as a setext underline); skip it.
             children
                 .iter()
-                .map(|item| (*item, list_item(doc, *item, "- ")))
+                .map(|item| (*item, list_item(doc, *item, &format!("{marker} "))))
                 // Bare empty items also retain a caret/editing boundary.
                 .enumerate()
                 .map(|(ix, (item, text))| {
                     if *ordered {
-                        let marker = format!("{}. ", start.unwrap_or(1) as usize + ix);
+                        let marker = format!("{}{marker} ", start.unwrap_or(1) as usize + ix);
                         // Render with the actual marker width so continuation
                         // indentation remains correct for multi-digit lists.
                         list_item(doc, item, &marker)

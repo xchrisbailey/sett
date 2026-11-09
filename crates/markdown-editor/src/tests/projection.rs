@@ -28,7 +28,8 @@ fn shapes(nodes: &[BlockNode]) -> String {
     collect_definitions(nodes, &mut defs);
     let mut blocks = Vec::new();
     for node in nodes {
-        import_block(node, &defs, &mut blocks);
+        // Compares structure only: no source, so every list gets the default marker.
+        import_block(node, "", &defs, &mut blocks);
     }
     let mut out = String::new();
     for block in &blocks {

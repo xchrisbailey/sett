@@ -45,6 +45,10 @@ pub(crate) enum BlockKindData {
     List {
         ordered: bool,
         start: Option<u32>,
+        /// FORK: the bullet (`-`, `*`, `+`) or ordered delimiter (`.`, `)`)
+        /// the list was written with. Lists with different markers are
+        /// different lists in Markdown.
+        marker: char,
     },
     ListItem {
         checked: Option<bool>,
@@ -74,6 +78,11 @@ pub(crate) enum BlockKindData {
         title: Option<SharedString>,
     },
     Unknown,
+}
+
+/// FORK: the marker a list gets when the source doesn't say otherwise.
+pub(crate) fn default_list_marker(ordered: bool) -> char {
+    if ordered { '.' } else { '-' }
 }
 
 impl BlockKindData {

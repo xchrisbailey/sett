@@ -3,7 +3,7 @@ use super::{
     editor::BlockEditorModel,
     id::BlockId,
     inline::InlineText,
-    kind::{BlockKind, BlockKindData},
+    kind::{BlockKind, BlockKindData, default_list_marker},
     marks::{MarkChange, MarkKind, MarkState},
     position::{BlockPosition, PositionError},
     selection::{BlockSelection, ResolvedSelection, SelectionError},
@@ -427,7 +427,7 @@ impl BlockEditorModel {
                     super::import::collect_definitions(&parsed, &mut defs);
                     let mut blocks = Vec::new();
                     for node in parsed.iter() {
-                        super::import::import_block(node, &defs, &mut blocks);
+                        super::import::import_block(node, core, &defs, &mut blocks);
                     }
                     match (blocks.len(), blocks.pop()) {
                         (1, Some(block)) if block.kind == BlockKindData::Paragraph => {
@@ -971,7 +971,10 @@ impl BlockEditorModel {
         let Some((list, index)) = doc.index_in_parent(item) else {
             return Ok(false);
         };
-        let Some(BlockKindData::List { ordered, .. }) = doc.kind(list).cloned() else {
+        let Some(BlockKindData::List {
+            ordered, marker, ..
+        }) = doc.kind(list).cloned()
+        else {
             return Ok(false);
         };
         let Some((outer, list_index)) = doc.index_in_parent(list) else {
@@ -1002,6 +1005,7 @@ impl BlockEditorModel {
                     BlockKindData::List {
                         ordered,
                         start: None,
+                        marker,
                     },
                     rest,
                 );
@@ -1055,7 +1059,7 @@ impl BlockEditorModel {
         super::import::collect_definitions(&parsed, &mut defs);
         let mut blocks = Vec::new();
         for node in parsed.iter() {
-            super::import::import_block(node, &defs, &mut blocks);
+            super::import::import_block(node, text, &defs, &mut blocks);
         }
         // Nothing structural (one paragraph, soft line breaks only): plain
         // text, where each line becomes a block as typed.
@@ -1493,12 +1497,20 @@ impl BlockEditorModel {
                     let Some(BlockKindData::List {
                         ordered: was,
                         start,
+                        marker,
                     }) = tx.doc.kind(list).cloned()
                     else {
                         return Ok(None);
                     };
                     if was != ordered {
-                        tx.set_kind(list, BlockKindData::List { ordered, start })?;
+                        tx.set_kind(
+                            list,
+                            BlockKindData::List {
+                                ordered,
+                                start,
+                                marker: default_list_marker(ordered),
+                            },
+                        )?;
                         return Ok(None);
                     }
                     // Lift the item out of its list, splitting the list.
@@ -1513,6 +1525,7 @@ impl BlockEditorModel {
                             BlockKindData::List {
                                 ordered,
                                 start: None,
+                                marker,
                             },
                             after,
                         );
@@ -1532,6 +1545,7 @@ impl BlockEditorModel {
                         BlockKindData::List {
                             ordered,
                             start: None,
+                            marker: default_list_marker(ordered),
                         },
                         vec![DetachedBlock::container(
                             BlockKindData::ListItem {
@@ -1661,10 +1675,12 @@ impl BlockEditorModel {
             return Ok(false);
         }
         let prev = self.doc.children(list)[index - 1];
-        let ordered = matches!(
-            self.doc.kind(list),
-            Some(BlockKindData::List { ordered: true, .. })
-        );
+        let (ordered, marker) = match self.doc.kind(list) {
+            Some(BlockKindData::List {
+                ordered, marker, ..
+            }) => (*ordered, *marker),
+            _ => (false, default_list_marker(false)),
+        };
         self.transact(EditOrigin::Command("indent"), |tx| {
             let nested = tx
                 .doc
@@ -1684,6 +1700,7 @@ impl BlockEditorModel {
                         BlockKindData::List {
                             ordered,
                             start: None,
+                            marker,
                         },
                         vec![block],
                     );

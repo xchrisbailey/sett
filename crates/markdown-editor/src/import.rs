@@ -8,13 +8,13 @@ use gpui::SharedString;
 use super::{
     document::{AtomData, BlockContent, EditorDocument},
     inline::{InlineAtom, InlineText},
-    kind::BlockKindData,
+    kind::{BlockKindData, default_list_marker},
     step::DetachedBlock,
     transaction::TransactionBuilder,
 };
 use gpui_kit::base::text::{
     MarkdownExtensions,
-    editor_host::{BlockNode, InlineNode, LinkMark, Paragraph, TextMark, parse_markdown},
+    editor_host::{BlockNode, InlineNode, LinkMark, Paragraph, Span, TextMark, parse_markdown},
 };
 
 pub(crate) fn parse_document(
@@ -30,7 +30,7 @@ pub(crate) fn parse_document(
     collect_definitions(&parsed, &mut defs);
     let mut blocks = Vec::new();
     for node in parsed.iter() {
-        import_block(node, &defs, &mut blocks);
+        import_block(node, source, &defs, &mut blocks);
     }
     for (ix, block) in blocks.into_iter().enumerate() {
         doc.attach(root, ix, block);
@@ -117,20 +117,26 @@ fn leaf(kind: BlockKindData, content: BlockContent) -> DetachedBlock {
     DetachedBlock::leaf(kind, content)
 }
 
-fn import_children(nodes: &[BlockNode], defs: &Defs) -> Vec<DetachedBlock> {
+fn import_children(nodes: &[BlockNode], source: &str, defs: &Defs) -> Vec<DetachedBlock> {
     let mut out = Vec::new();
     for node in nodes {
-        import_block(node, defs, &mut out);
+        import_block(node, source, defs, &mut out);
     }
     out
 }
 
-pub(crate) fn import_block(node: &BlockNode, defs: &Defs, out: &mut Vec<DetachedBlock>) {
+/// `source` is the Markdown `node` was parsed from; its spans index into it.
+pub(crate) fn import_block(
+    node: &BlockNode,
+    source: &str,
+    defs: &Defs,
+    out: &mut Vec<DetachedBlock>,
+) {
     let block = match node {
         // An HTML container: splice its children in place.
         BlockNode::Root { children, .. } => {
             for child in children {
-                import_block(child, defs, out);
+                import_block(child, source, defs, out);
             }
             return;
         }
@@ -144,20 +150,22 @@ pub(crate) fn import_block(node: &BlockNode, defs: &Defs, out: &mut Vec<Detached
             BlockKindData::Heading { level: *level },
             BlockContent::Inline(import_inline(children, defs)),
         ),
-        BlockNode::Blockquote { children, .. } => {
-            DetachedBlock::container(BlockKindData::Blockquote, import_children(children, defs))
-        }
+        BlockNode::Blockquote { children, .. } => DetachedBlock::container(
+            BlockKindData::Blockquote,
+            import_children(children, source, defs),
+        ),
         BlockNode::List {
             children,
             ordered,
             start,
-            ..
+            span,
         } => DetachedBlock::container(
             BlockKindData::List {
                 ordered: *ordered,
                 start: *start,
+                marker: list_marker(source, *span, *ordered),
             },
-            import_children(children, defs),
+            import_children(children, source, defs),
         ),
         BlockNode::ListItem {
             children,
@@ -165,7 +173,7 @@ pub(crate) fn import_block(node: &BlockNode, defs: &Defs, out: &mut Vec<Detached
             checked,
             ..
         } => {
-            let mut children = import_children(children, defs);
+            let mut children = import_children(children, source, defs);
             // A parsed bare marker is an editable empty item, not an empty
             // container to prune during normalization.
             if children.is_empty() {
@@ -240,6 +248,27 @@ pub(crate) fn import_block(node: &BlockNode, defs: &Defs, out: &mut Vec<Detached
         BlockNode::Unknown | _ => leaf(BlockKindData::Unknown, BlockContent::Atom(AtomData::None)),
     };
     out.push(block);
+}
+
+/// FORK: the marker the list starting at `span` was written with: the
+/// bullet character, or the delimiter after an ordered list's number.
+fn list_marker(source: &str, span: Option<Span>, ordered: bool) -> char {
+    let written = span
+        .and_then(|span| source.get(span.start..))
+        .map(|rest| rest.trim_start_matches([' ', '\t']))
+        .and_then(|rest| {
+            if ordered {
+                rest.trim_start_matches(|ch: char| ch.is_ascii_digit())
+                    .chars()
+                    .next()
+                    .filter(|ch| matches!(ch, '.' | ')'))
+            } else {
+                rest.chars()
+                    .next()
+                    .filter(|ch| matches!(ch, '-' | '*' | '+'))
+            }
+        });
+    written.unwrap_or(default_list_marker(ordered))
 }
 
 /// Convert a paragraph's inline nodes into normalized runs. `InlineNode.marks`

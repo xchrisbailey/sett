@@ -155,7 +155,7 @@ impl NodeCache {
                 children: children(self),
                 span: None,
             },
-            BlockKindData::List { ordered, start } => BlockNode::List {
+            BlockKindData::List { ordered, start, .. } => BlockNode::List {
                 children: children(self),
                 ordered: *ordered,
                 start: *start,

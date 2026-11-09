@@ -15,6 +15,40 @@ fn assert_round_trips(source: &str) {
     assert_eq!(save(source), source);
 }
 
+fn fixture(name: &str) -> String {
+    let path = format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
+    std::fs::read_to_string(&path).unwrap_or_else(|err| panic!("{path}: {err}"))
+}
+
+/// Fixtures whose bytes survive a load and save unchanged.
+const IDENTICAL: &[&str] = &["01-checklist.md", "07-long-note.md"];
+
+/// Fixtures that use syntax the serializer normalises (see FORK.md); they
+/// only have to settle after one save.
+const NORMALISED: &[&str] = &[
+    "02-table.md",
+    "03-code.md",
+    "04-quote-and-marks.md",
+    "05-headings.md",
+    "06-agent-daily.md",
+];
+
+#[test]
+fn fixtures_round_trip_byte_for_byte() {
+    for name in IDENTICAL {
+        let source = fixture(name);
+        assert_eq!(save(&source), source, "{name}");
+    }
+}
+
+#[test]
+fn every_fixture_settles_after_one_save() {
+    for name in IDENTICAL.iter().chain(NORMALISED) {
+        let once = save(&fixture(name));
+        assert_eq!(save(&once), once, "{name}");
+    }
+}
+
 #[test]
 fn trailing_line_endings_are_kept_exactly() {
     for source in [
@@ -51,6 +85,22 @@ fn soft_line_breaks_are_kept() {
         "1. Ordered item\n   continues here.\n",
         "**09:12** started the sync\n**09:40** *found the bug\nin the lock*\n",
         "A [link that\nwraps](notes.md) mid-text.\n",
+    ] {
+        assert_round_trips(source);
+    }
+}
+
+#[test]
+fn list_markers_are_kept() {
+    for source in [
+        "* star\n* bullets\n",
+        "+ plus\n+ bullets\n",
+        "1) paren\n2) ordered\n",
+        "3. dot\n4. ordered\n",
+        "- outer\n  * inner star\n",
+        "> * quoted star\n",
+        // Different markers make separate lists; they must not merge.
+        "- dash\n\n* star\n",
     ] {
         assert_round_trips(source);
     }

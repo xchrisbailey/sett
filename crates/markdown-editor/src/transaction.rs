@@ -277,11 +277,22 @@ impl<'a> TransactionBuilder<'a> {
                     return Some(Fix::LeadingParagraph(id));
                 }
                 for pair in children.windows(2) {
+                    // FORK: lists with different markers stay separate
+                    // lists in Markdown, so only same-marker lists merge.
                     if let (
-                        Some(BlockKindData::List { ordered: a, .. }),
-                        Some(BlockKindData::List { ordered: b, .. }),
+                        Some(BlockKindData::List {
+                            ordered: a,
+                            marker: marker_a,
+                            ..
+                        }),
+                        Some(BlockKindData::List {
+                            ordered: b,
+                            marker: marker_b,
+                            ..
+                        }),
                     ) = (doc.kind(pair[0]), doc.kind(pair[1]))
                         && a == b
+                        && marker_a == marker_b
                     {
                         return Some(Fix::MergeLists(pair[0], pair[1]));
                     }
