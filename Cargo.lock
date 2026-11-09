@@ -5763,6 +5763,8 @@ dependencies = [
 name = "sett-store"
 version = "0.1.0"
 dependencies = [
+ "async-channel",
+ "notify",
  "serde",
  "serde_yaml_ng",
  "tempfile",
