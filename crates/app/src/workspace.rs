@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 
 use gpui_kit::{App, AppContext as _, Context, Entity, Task};
 use sett_store::{
-    Board, Change, Date, EditorMode, INBOX_SLUG, JournalEntry, Note, Project, Settings, Space,
-    SpaceIndex, Store, Update, Watcher,
+    Board, Change, Date, EditorMode, INBOX_SLUG, ItemId, JournalEntry, Note, Project, Settings,
+    Space, SpaceIndex, Store, Update, Watcher,
 };
 
 /// What the center panel shows for the active Space.
@@ -32,6 +32,8 @@ pub struct Workspace {
     settings_path: Option<PathBuf>,
     index: SpaceIndex,
     selections: HashMap<Space, Selection>,
+    /// An Item asked to be opened, for whichever view shows it to take.
+    opening: Option<ItemId>,
     watched: bool,
     watching: Option<Watching>,
 }
@@ -82,6 +84,7 @@ impl Workspace {
                 settings_path,
                 index,
                 selections: HashMap::new(),
+                opening: None,
                 watched,
                 watching,
             }
@@ -110,10 +113,33 @@ impl Workspace {
         }
     }
 
+    /// Selects where an Item of the active Space lives and asks the view
+    /// there to open it, as following a Link does.
+    pub fn open_item(&mut self, item: ItemId, cx: &mut Context<Self>) {
+        let selection = match &item {
+            ItemId::Note { project: None, .. } => Selection::Notes,
+            ItemId::Note {
+                project: Some(project),
+                ..
+            }
+            | ItemId::Task { project, .. } => Selection::Project(project.clone()),
+            ItemId::Journal(_) => Selection::Journal,
+        };
+        self.selections.insert(self.space(), selection);
+        self.opening = Some(item);
+        cx.notify();
+    }
+
+    /// The Item [`Workspace::open_item`] asked for, if not yet opened.
+    pub(crate) fn take_opening(&mut self) -> Option<ItemId> {
+        self.opening.take()
+    }
+
     pub fn switch_space(&mut self, space: Space, cx: &mut Context<Self>) {
         if space == self.space() {
             return;
         }
+        self.opening = None;
         // Drop the old watcher first so no late event from it reaches the new index.
         self.watching = None;
         if self.watched {

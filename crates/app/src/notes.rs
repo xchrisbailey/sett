@@ -97,6 +97,13 @@ impl NotesView {
             .update(cx, |editor, cx| editor.open(item, window, cx));
     }
 
+    /// Opens a Note of whatever the list now shows, which may have just
+    /// changed.
+    pub(crate) fn reveal(&mut self, slug: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.sync(window, cx);
+        self.open_note(slug, window, cx);
+    }
+
     fn create_note(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let project = self.project().map(str::to_string);
         let result = self.workspace.update(cx, |w, cx| {

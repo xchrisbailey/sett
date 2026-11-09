@@ -13,6 +13,7 @@ use gpui_kit::{
 use markdown_editor::{BlockEditor, BlockEditorEvent, BlockEditorState};
 use sett_store::{Date, EditorMode, JournalEntry, Note, Space};
 
+use crate::item_links::ItemLinks;
 use crate::workspace::Workspace;
 
 /// How long after the last keystroke an edit is written.
@@ -528,6 +529,7 @@ impl Render for ItemEditor {
             .min_h_0()
             .child(header)
             .child(self.render_body(cx))
+            .child(ItemLinks::new(self.workspace.clone(), item.id()))
             .into_any_element()
     }
 }
