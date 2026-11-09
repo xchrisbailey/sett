@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use gpui_kit::{App, AppContext as _, Context, Entity, Task};
+use gpui_kit::{App, AppContext as _, Context, Entity, EventEmitter, Task};
 use sett_store::{
     Board, Change, Date, EditorMode, INBOX_SLUG, ItemId, JournalEntry, Note, Project, Settings,
     Space, SpaceIndex, Store, Update, Watcher,
@@ -23,6 +23,14 @@ impl Default for Selection {
     }
 }
 
+/// What the AppModel tells the views.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AppModelEvent {
+    /// Show this Item of the active Space. The selection already points at
+    /// where it lives.
+    OpenItem(ItemId),
+}
+
 /// The open data root and the active Space: its index, kept current by a
 /// watcher, and each Space's last selection. Only the active Space is indexed
 /// and watched, so nothing from the other Space is held (ADR 0002).
@@ -32,11 +40,11 @@ pub struct AppModel {
     settings_path: Option<PathBuf>,
     index: SpaceIndex,
     selections: HashMap<Space, Selection>,
-    /// An Item asked to be opened, for whichever view shows it to take.
-    opening: Option<ItemId>,
-    watched: bool,
+    /// `None` when the data root isn't watched, or watching it failed.
     watching: Option<Watching>,
 }
+
+impl EventEmitter<AppModelEvent> for AppModel {}
 
 struct Watching {
     _watcher: Watcher,
@@ -84,8 +92,6 @@ impl AppModel {
                 settings_path,
                 index,
                 selections: HashMap::new(),
-                opening: None,
-                watched,
                 watching,
             }
         }))
@@ -126,23 +132,16 @@ impl AppModel {
             ItemId::Journal(_) => Selection::Journal,
         };
         self.selections.insert(self.space(), selection);
-        self.opening = Some(item);
+        cx.emit(AppModelEvent::OpenItem(item));
         cx.notify();
-    }
-
-    /// The Item [`AppModel::open_item`] asked for, if not yet opened.
-    pub(crate) fn take_opening(&mut self) -> Option<ItemId> {
-        self.opening.take()
     }
 
     pub fn switch_space(&mut self, space: Space, cx: &mut Context<Self>) {
         if space == self.space() {
             return;
         }
-        self.opening = None;
         // Drop the old watcher first so no late event from it reaches the new index.
-        self.watching = None;
-        if self.watched {
+        if self.watching.take().is_some() {
             self.watching = watch(&self.store, space, cx);
         }
         self.index = SpaceIndex::scan(&self.store, space);

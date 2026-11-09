@@ -14,7 +14,7 @@ mod project_dialog;
 mod shell;
 mod task_view;
 
-pub use app_model::{AppModel, Selection};
+pub use app_model::{AppModel, AppModelEvent, Selection};
 pub use board::BoardEvent;
 pub use icons::AppAssets;
 pub use shell::{

@@ -9,7 +9,7 @@ use gpui_kit::{
 
 use sett_store::{ItemId, Space};
 
-use crate::app_model::{AppModel, Selection, today};
+use crate::app_model::{AppModel, AppModelEvent, Selection, today};
 use crate::board::{BoardEvent, BoardView};
 use crate::item_editor::{ItemEditor, ItemRef};
 use crate::notes::{NotesScope, NotesView};
@@ -46,13 +46,19 @@ impl CenterPanel {
         cx: &mut Context<Self>,
     ) -> Self {
         let observe = cx.observe_in(&model, window, |this, _, window, cx| {
-            this.sync(window, cx);
+            this.sync(None, window, cx);
+            cx.notify();
+        });
+        let open_item = cx.subscribe_in(&model, window, |this, _, event, window, cx| {
+            let AppModelEvent::OpenItem(item) = event;
+            this.open_item(item.clone(), window, cx);
             cx.notify();
         });
         let board = cx.new(|cx| BoardView::new(model.clone(), window, cx));
         let task = cx.new(|cx| TaskView::new(model.clone(), window, cx));
         let subscriptions = vec![
             observe,
+            open_item,
             cx.subscribe_in(&board, window, |this, _, event, window, cx| {
                 let BoardEvent::OpenTask { project, slug } = event;
                 this.task
@@ -81,21 +87,28 @@ impl CenterPanel {
             shown: None,
             _subscriptions: subscriptions,
         };
-        panel.sync(window, cx);
+        panel.sync(None, window, cx);
         panel
     }
 
-    /// Saves pending edits in whatever was just hidden, and opens today's
-    /// Journal Entry when the Journal is shown.
-    fn sync(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let opening = self.model.update(cx, |w, _| w.take_opening());
-        match &opening {
-            Some(ItemId::Task { .. }) => self.project_tab = ProjectTab::Board,
-            Some(ItemId::Note {
+    /// Shows an Item the AppModel was asked to open, in the view for it.
+    fn open_item(&mut self, item: ItemId, window: &mut Window, cx: &mut Context<Self>) {
+        match &item {
+            ItemId::Task { .. } => self.project_tab = ProjectTab::Board,
+            ItemId::Note {
                 project: Some(_), ..
-            }) => self.project_tab = ProjectTab::Notes,
+            } => self.project_tab = ProjectTab::Notes,
             _ => {}
         }
+        self.sync(Some(&item), window, cx);
+        let space = self.model.read(cx).space();
+        self.reveal(item, space, window, cx);
+    }
+
+    /// Saves pending edits in whatever was just hidden, and opens today's
+    /// Journal Entry when the Journal is shown, unless `opening` is another
+    /// Journal Entry.
+    fn sync(&mut self, opening: Option<&ItemId>, window: &mut Window, cx: &mut Context<Self>) {
         let model = self.model.read(cx);
         let (space, selection) = (model.space(), model.selection());
         let shown = Some((selection.clone(), self.project_tab));
@@ -116,13 +129,9 @@ impl CenterPanel {
                     .update(cx, |journal, cx| journal.open(today, window, cx));
             }
         }
-        if let Some(item) = opening {
-            self.reveal(item, space, window, cx);
-        }
     }
 
-    /// Opens an Item the AppModel was asked to open, once its view is the
-    /// one selected.
+    /// Opens an Item in its view, once that view is the one selected.
     fn reveal(&mut self, item: ItemId, space: Space, window: &mut Window, cx: &mut Context<Self>) {
         match item {
             ItemId::Note {
@@ -219,7 +228,7 @@ impl CenterPanel {
                 } else {
                     ProjectTab::Notes
                 };
-                this.sync(window, cx);
+                this.sync(None, window, cx);
                 cx.notify();
             }))
             .child(Tab::new().label("Board"))
