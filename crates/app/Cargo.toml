@@ -7,6 +7,7 @@ publish.workspace = true
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 gpui-kit.workspace = true
+gpui-kit-markdown-editor = { path = "../markdown-editor" }
 sett-store = { path = "../store" }
 
 [dev-dependencies]

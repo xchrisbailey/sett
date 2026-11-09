@@ -207,7 +207,9 @@ impl Store {
             return None;
         }
         let path = self.notes_dir(space, project).join(md(slug));
-        Some(Note::from_doc(space, project, slug, read_doc(&path)?))
+        let mut note = Note::from_doc(space, project, slug, read_doc(&path)?);
+        note.modified = modified(&path);
+        Some(note)
     }
 
     pub fn journal_entry(&self, space: Space, date: Date) -> Option<JournalEntry> {
@@ -217,9 +219,14 @@ impl Store {
 
     /// Space-level Notes when `project` is `None`, otherwise that Project's.
     pub fn notes(&self, space: Space, project: Option<&str>) -> Vec<Note> {
-        markdown_files(&self.notes_dir(space, project))
+        let dir = self.notes_dir(space, project);
+        markdown_files(&dir)
             .into_iter()
-            .map(|(slug, doc)| Note::from_doc(space, project, &slug, doc))
+            .map(|(slug, doc)| {
+                let mut note = Note::from_doc(space, project, &slug, doc);
+                note.modified = modified(&dir.join(md(&slug)));
+                note
+            })
             .collect()
     }
 
@@ -370,6 +377,7 @@ impl Store {
         note.created = Some(today);
         self.write_new(&dir, &slug, note.to_doc())?;
         note.fields = note.to_doc().fields;
+        note.modified = modified(&dir.join(md(&slug)));
         Ok(note)
     }
 
@@ -399,8 +407,10 @@ impl Store {
         check_slug(&note.slug)?;
         let dir = self.notes_dir(note.space, note.project.as_deref());
         let doc = note.to_doc();
-        self.write_doc(&dir.join(md(&note.slug)), &doc)?;
+        let path = dir.join(md(&note.slug));
+        self.write_doc(&path, &doc)?;
         note.fields = doc.fields;
+        note.modified = modified(&path);
         Ok(())
     }
 
@@ -535,6 +545,10 @@ impl Store {
 fn task_order(a: &Task, b: &Task) -> std::cmp::Ordering {
     let key = |t: &Task| t.order.unwrap_or(f64::INFINITY);
     key(a).total_cmp(&key(b)).then_with(|| a.slug.cmp(&b.slug))
+}
+
+fn modified(path: &Path) -> Option<std::time::SystemTime> {
+    fs::metadata(path).and_then(|m| m.modified()).ok()
 }
 
 fn md(slug: &str) -> String {

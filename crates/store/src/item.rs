@@ -1,3 +1,5 @@
+use std::time::SystemTime;
+
 use serde_yaml_ng::Mapping;
 
 use crate::frontmatter::Document;
@@ -129,6 +131,9 @@ pub struct Note {
     pub title: String,
     pub created: Option<Date>,
     pub body: String,
+    /// When the file was last written, by sett or anyone else. `None` for a
+    /// file whose time can't be read.
+    pub modified: Option<SystemTime>,
     /// Every frontmatter key as last read or written, so unknown keys survive
     /// a save in their original order.
     pub(crate) fields: Mapping,
@@ -143,6 +148,7 @@ impl Note {
             title: doc.str("title").unwrap_or_else(|| slug.to_string()),
             created: doc.date("created"),
             body: doc.body.clone(),
+            modified: None,
             fields: doc.fields,
         }
     }

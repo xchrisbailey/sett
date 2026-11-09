@@ -4,7 +4,8 @@ use std::path::{Path, PathBuf};
 
 use gpui_kit::{App, AppContext as _, Context, Entity, Task};
 use sett_store::{
-    Board, Change, Date, INBOX_SLUG, Project, Settings, Space, SpaceIndex, Store, Update, Watcher,
+    Board, Change, Date, EditorMode, INBOX_SLUG, JournalEntry, Note, Project, Settings, Space,
+    SpaceIndex, Store, Update, Watcher,
 };
 
 /// What the center panel shows for the active Space.
@@ -203,6 +204,74 @@ impl Workspace {
         self.apply_change(Change::Project(slug.to_string()), cx);
     }
 
+    pub fn editor_mode(&self) -> EditorMode {
+        self.settings.editor_mode
+    }
+
+    /// Switches every editor between the block view and raw Markdown, and
+    /// remembers the choice in `settings.toml`.
+    pub fn toggle_editor_mode(&mut self, cx: &mut Context<Self>) {
+        self.settings.editor_mode = match self.settings.editor_mode {
+            EditorMode::Block => EditorMode::Raw,
+            EditorMode::Raw => EditorMode::Block,
+        };
+        self.save_settings();
+        cx.notify();
+    }
+
+    /// Creates a Note in the active Space, in `project` or at Space level.
+    /// Returns its slug, which stays fixed when the Note is renamed.
+    pub fn create_note(
+        &mut self,
+        project: Option<&str>,
+        title: &str,
+        cx: &mut Context<Self>,
+    ) -> io::Result<String> {
+        let note = self
+            .store
+            .create_note(self.space(), project, title, today())?;
+        self.apply_change(note_change(project, &note.slug), cx);
+        Ok(note.slug)
+    }
+
+    /// Writes a Note. It may belong to a Space that is no longer active when
+    /// an edit is saved on the way out of it.
+    pub fn save_note(&mut self, note: &mut Note, cx: &mut Context<Self>) -> io::Result<()> {
+        self.store.save_note(note)?;
+        if note.space == self.space() {
+            self.apply_change(note_change(note.project.as_deref(), &note.slug), cx);
+        }
+        Ok(())
+    }
+
+    /// Writes a Journal Entry, creating its file the first time.
+    pub fn save_journal_entry(
+        &mut self,
+        entry: &mut JournalEntry,
+        cx: &mut Context<Self>,
+    ) -> io::Result<()> {
+        self.store.save_journal_entry(entry)?;
+        if entry.space == self.space() {
+            self.apply_change(Change::Journal(entry.date), cx);
+        }
+        Ok(())
+    }
+
+    /// Moves a Note of the active Space to the Trash.
+    pub fn trash_note(
+        &mut self,
+        project: Option<&str>,
+        slug: &str,
+        cx: &mut Context<Self>,
+    ) -> io::Result<()> {
+        let note = self.index.note(project, slug).cloned().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, format!("note {slug} not found"))
+        })?;
+        self.store.trash_note(&note)?;
+        self.apply_change(note_change(project, slug), cx);
+        Ok(())
+    }
+
     /// Brings the active Space's index in line with an outside change to it.
     pub fn apply_change(&mut self, change: Change, cx: &mut Context<Self>) {
         if self.index.apply(&self.store, &change) != Update::Unchanged {
@@ -330,11 +399,15 @@ impl Workspace {
 
     fn save_last_space(&mut self, space: Space) {
         self.settings.last_space = space;
+        self.save_settings();
+    }
+
+    fn save_settings(&self) {
         if let Some(path) = &self.settings_path
             && let Err(err) = self.settings.save(path)
         {
             // Not worth interrupting the user: the worst case is reopening in
-            // the other Space.
+            // the other Space or editor mode.
             eprintln!("sett: couldn't save settings to {}: {err}", path.display());
         }
     }
@@ -353,6 +426,13 @@ pub(crate) fn today() -> Date {
         )
     };
     date().expect("the local date is a valid calendar date")
+}
+
+fn note_change(project: Option<&str>, slug: &str) -> Change {
+    Change::Note {
+        project: project.map(str::to_string),
+        slug: slug.to_string(),
+    }
 }
 
 fn task_change(project: &str, slug: &str) -> Change {

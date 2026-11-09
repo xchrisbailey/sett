@@ -6538,6 +6538,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "gpui-kit",
+ "gpui-kit-markdown-editor",
  "sett-store",
  "tempfile",
 ]

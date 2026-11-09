@@ -4,7 +4,7 @@ use gpui_kit::component::TitleBar;
 use gpui_kit::*;
 use sett::{
     ArchiveProject, DeleteProject, EditProject, NewProject, Shell, ShowPersonal, ShowWork,
-    UnarchiveProject, Workspace,
+    ToggleEditorMode, UnarchiveProject, Workspace,
 };
 use sett_store::Settings;
 
@@ -27,6 +27,7 @@ fn main() {
         cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
         cx.set_menus(vec![
             Menu::new("sett").items([MenuItem::action("Quit sett", Quit)]),
+            Menu::new("View").items([MenuItem::action("Toggle Raw Markdown", ToggleEditorMode)]),
             Menu::new("Space").items([
                 MenuItem::action("Personal", ShowPersonal),
                 MenuItem::action("Work", ShowWork),

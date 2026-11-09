@@ -12,7 +12,7 @@ use crate::nav::Nav;
 use crate::project_dialog;
 use crate::workspace::{Selection, Workspace};
 
-actions!(sett, [ShowPersonal, ShowWork]);
+actions!(sett, [ShowPersonal, ShowWork, ToggleEditorMode]);
 
 // The menu-bar route to the commands the nav's context menu offers. Each acts
 // on the selected Project and is only handled when it applies, which is what
@@ -35,6 +35,7 @@ pub fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("cmd-1", ShowPersonal, Some(CONTEXT)),
         KeyBinding::new("cmd-2", ShowWork, Some(CONTEXT)),
+        KeyBinding::new("cmd-/", ToggleEditorMode, Some(CONTEXT)),
     ]);
 }
 
@@ -125,6 +126,10 @@ impl Render for Shell {
                 cx.listener(|this, _: &ShowPersonal, _, cx| this.show_space(Space::Personal, cx)),
             )
             .on_action(cx.listener(|this, _: &ShowWork, _, cx| this.show_space(Space::Work, cx)))
+            .on_action(cx.listener(|this, _: &ToggleEditorMode, _, cx| {
+                this.workspace
+                    .update(cx, |workspace, cx| workspace.toggle_editor_mode(cx))
+            }))
             .on_action(cx.listener(|this, _: &NewProject, window, cx| {
                 project_dialog::open_new_project(this.workspace.clone(), window, cx)
             }))
