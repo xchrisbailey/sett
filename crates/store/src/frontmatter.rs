@@ -10,29 +10,40 @@ use crate::Date;
 pub(crate) struct Document {
     pub fields: Mapping,
     pub body: String,
+    /// The raw YAML when the frontmatter block isn't a readable mapping
+    /// (duplicate keys, a list, bad syntax). Such a file is never written.
+    pub unreadable: Option<String>,
 }
 
 impl Document {
-    /// Never fails: a missing, unterminated or unparseable frontmatter block
-    /// leaves `fields` empty so the Item still loads with defaults.
+    /// Never fails: a missing or unterminated frontmatter block leaves
+    /// `fields` empty so the Item still loads with defaults. An unparseable
+    /// block also loads with defaults but keeps its text in `unreadable`, so
+    /// callers can refuse to write the file instead of "fixing" it.
     pub fn parse(text: &str) -> Document {
         let Some((yaml, body)) = split(text) else {
             return Document {
-                fields: Mapping::new(),
                 body: text.to_string(),
+                ..Document::default()
             };
         };
-        let fields = match serde_yaml_ng::from_str::<Value>(yaml) {
-            Ok(Value::Mapping(m)) => m,
-            _ => Mapping::new(),
+        let (fields, unreadable) = match serde_yaml_ng::from_str::<Value>(yaml) {
+            Ok(Value::Mapping(m)) => (m, None),
+            // An empty or comment-only block.
+            Ok(Value::Null) => (Mapping::new(), None),
+            _ => (Mapping::new(), Some(yaml.to_string())),
         };
         Document {
             fields,
             body: body.to_string(),
+            unreadable,
         }
     }
 
     pub fn render(&self) -> String {
+        if let Some(raw) = &self.unreadable {
+            return format!("---\n{raw}---\n{}", self.body);
+        }
         if self.fields.is_empty() {
             return self.body.clone();
         }

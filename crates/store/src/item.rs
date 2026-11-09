@@ -24,9 +24,17 @@ pub struct Task {
     /// Every frontmatter key as last read or written, so unknown keys survive
     /// a save in their original order.
     pub(crate) fields: Mapping,
+    /// The raw frontmatter when it couldn't be read; see [`Task::frontmatter_error`].
+    pub(crate) unreadable: Option<String>,
 }
 
 impl Task {
+    /// Whether the file's frontmatter couldn't be read. sett never writes such
+    /// a file, so it must be fixed in another editor.
+    pub fn frontmatter_error(&self) -> bool {
+        self.unreadable.is_some()
+    }
+
     pub(crate) fn from_doc(space: Space, project: &str, slug: &str, doc: Document) -> Task {
         Task {
             space,
@@ -40,6 +48,7 @@ impl Task {
             done: doc.date("done"),
             body: doc.body.clone(),
             fields: doc.fields,
+            unreadable: doc.unreadable,
         }
     }
 
@@ -47,6 +56,7 @@ impl Task {
         let mut doc = Document {
             fields: self.fields.clone(),
             body: String::new(),
+            unreadable: self.unreadable.clone(),
         };
         doc.set("title", self.title.as_str());
         doc.set_opt("column", self.column.as_deref());
@@ -137,9 +147,17 @@ pub struct Note {
     /// Every frontmatter key as last read or written, so unknown keys survive
     /// a save in their original order.
     pub(crate) fields: Mapping,
+    /// The raw frontmatter when it couldn't be read; see [`Note::frontmatter_error`].
+    pub(crate) unreadable: Option<String>,
 }
 
 impl Note {
+    /// Whether the file's frontmatter couldn't be read. sett never writes such
+    /// a file, so it must be fixed in another editor.
+    pub fn frontmatter_error(&self) -> bool {
+        self.unreadable.is_some()
+    }
+
     pub(crate) fn from_doc(space: Space, project: Option<&str>, slug: &str, doc: Document) -> Note {
         Note {
             space,
@@ -150,6 +168,7 @@ impl Note {
             body: doc.body.clone(),
             modified: None,
             fields: doc.fields,
+            unreadable: doc.unreadable,
         }
     }
 
@@ -157,6 +176,7 @@ impl Note {
         let mut doc = Document {
             fields: self.fields.clone(),
             body: String::new(),
+            unreadable: self.unreadable.clone(),
         };
         doc.set("title", self.title.as_str());
         doc.set_opt("created", self.created.map(|d| d.to_string()));
@@ -173,9 +193,17 @@ pub struct JournalEntry {
     /// Every frontmatter key as last read or written, so unknown keys survive
     /// a save in their original order.
     pub(crate) fields: Mapping,
+    /// The raw frontmatter when it couldn't be read; see [`JournalEntry::frontmatter_error`].
+    pub(crate) unreadable: Option<String>,
 }
 
 impl JournalEntry {
+    /// Whether the file's frontmatter couldn't be read. sett never writes such
+    /// a file, so it must be fixed in another editor.
+    pub fn frontmatter_error(&self) -> bool {
+        self.unreadable.is_some()
+    }
+
     /// An empty entry held in memory only; nothing is written until it's saved.
     pub fn new(space: Space, date: Date) -> JournalEntry {
         JournalEntry {
@@ -183,6 +211,7 @@ impl JournalEntry {
             date,
             body: String::new(),
             fields: Mapping::new(),
+            unreadable: None,
         }
     }
 
@@ -192,6 +221,7 @@ impl JournalEntry {
             date,
             body: doc.body,
             fields: doc.fields,
+            unreadable: doc.unreadable,
         }
     }
 
@@ -199,6 +229,7 @@ impl JournalEntry {
         let mut doc = Document {
             fields: self.fields.clone(),
             body: String::new(),
+            unreadable: self.unreadable.clone(),
         };
         doc.body = self.body.clone();
         doc

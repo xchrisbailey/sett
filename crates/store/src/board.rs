@@ -82,8 +82,9 @@ impl<'a> Board<'a> {
     /// only the moved Task, ordered halfway between its new neighbours. When
     /// there is no room left between them (or a neighbour has no `order`),
     /// the whole Column is renumbered `1, 2, 3, …`, skipping Tasks whose order
-    /// already matches. Empty when the Task wouldn't move. `None` when the
-    /// Task or Column doesn't exist.
+    /// already matches. Tasks whose frontmatter can't be read are left out of
+    /// a renumber since sett never writes them. Empty when the Task wouldn't
+    /// move. `None` when the Task or Column doesn't exist.
     pub(crate) fn plan_move(
         &self,
         slug: &str,
@@ -121,7 +122,9 @@ impl<'a> Board<'a> {
                 .zip(1..)
                 .map(|(t, n)| (t, f64::from(n)))
                 .filter(|(t, order)| {
-                    t.slug == slug || t.order != Some(*order) || t.column.as_deref() != Some(to)
+                    t.slug == slug
+                        || !t.frontmatter_error()
+                            && (t.order != Some(*order) || t.column.as_deref() != Some(to))
                 })
                 .collect(),
         )
@@ -155,6 +158,7 @@ fn order_between(prev: Option<&Task>, next: Option<&Task>) -> Option<f64> {
 /// Column edits. Tasks name their Column by its name, so renaming a Column
 /// rewrites the Tasks in it; and Task State follows from position, so a
 /// change to which Column is last updates `done` on the Tasks it affects.
+/// Tasks whose frontmatter can't be read are skipped, never rewritten.
 impl Store {
     /// Adds a Column just before the last one, so the done Column stays last.
     pub fn add_column(&self, project: &mut Project, name: &str) -> io::Result<()> {
@@ -183,7 +187,7 @@ impl Store {
         *column = to.clone();
         self.save_project(&mut updated)?;
         *project = updated;
-        for task in tasks {
+        for task in tasks.into_iter().filter(|t| !t.frontmatter_error()) {
             if task.column.as_deref() == Some(from) {
                 let mut task = task.clone();
                 task.column = Some(to.clone());
@@ -253,7 +257,7 @@ impl Store {
         if old_last == new_last {
             return Ok(());
         }
-        for task in tasks {
+        for task in tasks.into_iter().filter(|t| !t.frontmatter_error()) {
             if task.column != old_last && task.column != new_last {
                 continue;
             }

@@ -67,11 +67,19 @@ pub struct Project {
     pub archived: bool,
     pub body: String,
     fields: Mapping,
+    /// The raw frontmatter when it couldn't be read; see [`Project::frontmatter_error`].
+    unreadable: Option<String>,
 }
 
 impl Project {
     pub fn is_inbox(&self) -> bool {
         self.slug == INBOX_SLUG
+    }
+
+    /// Whether `project.md`'s frontmatter couldn't be read. sett never writes
+    /// such a Project, so its name, icon and Columns can't be changed in sett.
+    pub fn frontmatter_error(&self) -> bool {
+        self.unreadable.is_some()
     }
 
     fn from_doc(space: Space, slug: &str, doc: Document) -> Project {
@@ -86,6 +94,7 @@ impl Project {
             archived: doc.bool("archived").unwrap_or(false),
             body: doc.body,
             fields: doc.fields,
+            unreadable: doc.unreadable,
         }
     }
 
@@ -93,6 +102,7 @@ impl Project {
         let mut doc = Document {
             fields: self.fields.clone(),
             body: self.body.clone(),
+            unreadable: self.unreadable.clone(),
         };
         doc.set("name", self.name.as_str());
         doc.set_opt("icon", self.icon.as_deref());
@@ -308,11 +318,19 @@ impl Store {
         self.write_task_new(task)
     }
 
+    /// Refuses a Project whose frontmatter can't be read, since its real
+    /// Columns aren't known and a new Task would land in a default one.
     fn columns_of(&self, space: Space, project: &str) -> io::Result<Vec<String>> {
         check_slug(project)?;
-        self.project(space, project)
-            .map(|p| p.columns)
-            .ok_or_else(|| not_found(format!("project {project}")))
+        let project = self
+            .project(space, project)
+            .ok_or_else(|| not_found(format!("project {project}")))?;
+        if project.frontmatter_error() {
+            return Err(unreadable_frontmatter(
+                &self.project_dir(space, &project.slug).join("project.md"),
+            ));
+        }
+        Ok(project.columns)
     }
 
     /// A Task with a fresh slug from `title`, not yet written.
@@ -490,7 +508,13 @@ impl Store {
 
     /// Writes via a hidden temp file and a rename, so neither the watcher nor
     /// an agent ever reads a half-written file.
+    ///
+    /// Refuses a document whose frontmatter couldn't be read: rewriting it
+    /// would replace the user's YAML with defaults (ADR 0001).
     fn write_doc(&self, path: &Path, doc: &Document) -> io::Result<()> {
+        if doc.unreadable.is_some() {
+            return Err(unreadable_frontmatter(path));
+        }
         let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
             return Err(invalid(format!("invalid path {path:?}")));
         };
@@ -595,6 +619,16 @@ fn check_slug(slug: &str) -> io::Result<()> {
 
 fn invalid(msg: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, msg.into())
+}
+
+fn unreadable_frontmatter(path: &Path) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!(
+            "the frontmatter of {} can't be read, so sett won't save it",
+            path.display()
+        ),
+    )
 }
 
 fn not_found(what: String) -> io::Error {
