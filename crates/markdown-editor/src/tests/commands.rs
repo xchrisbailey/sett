@@ -737,10 +737,10 @@ fn d20_alignment_writes_and_round_trips() {
         m.source(),
         "| a | b | c |\n| :---: | --- | --- |\n| 1 | 2 | 3 |"
     );
-    // Short delimiter rows from elsewhere normalise to three dashes.
+    // FORK: short delimiter rows from elsewhere are kept as written.
     assert_eq!(
         model("| a | b | c |\n| :-- | :-: | --: |\n| 1 | 2 | 3 |").source(),
-        "| a | b | c |\n| :--- | :---: | ---: |\n| 1 | 2 | 3 |"
+        "| a | b | c |\n| :-- | :-: | --: |\n| 1 | 2 | 3 |"
     );
 }
 

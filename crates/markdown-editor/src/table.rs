@@ -62,7 +62,7 @@ fn empty_row(cols: usize) -> DetachedBlock {
 
 fn aligns(doc: &EditorDocument, table: BlockId) -> Vec<ColumnAlign> {
     match doc.kind(table) {
-        Some(BlockKindData::Table { aligns }) => aligns.clone(),
+        Some(BlockKindData::Table { aligns, .. }) => aligns.clone(),
         _ => Vec::new(),
     }
 }
@@ -223,6 +223,7 @@ impl BlockEditorModel {
         let table = DetachedBlock::container(
             BlockKindData::Table {
                 aligns: vec![ColumnAlign::default(); cols],
+                delimiter_row: None,
             },
             (0..rows).map(|_| empty_row(cols)).collect(),
         );
@@ -390,6 +391,7 @@ impl BlockEditorModel {
                         table,
                         BlockKindData::Table {
                             aligns: aligns.clone(),
+                            delimiter_row: None,
                         },
                     )?;
                     caret_cell
@@ -406,6 +408,7 @@ impl BlockEditorModel {
                         table,
                         BlockKindData::Table {
                             aligns: aligns.clone(),
+                            delimiter_row: None,
                         },
                     )?;
                     if c1 + 1 < cols {
@@ -422,6 +425,7 @@ impl BlockEditorModel {
                         table,
                         BlockKindData::Table {
                             aligns: aligns.clone(),
+                            delimiter_row: None,
                         },
                     )?;
                     // Keep the selection (a column stays selected).
@@ -584,6 +588,7 @@ impl BlockEditorModel {
         let table = DetachedBlock::container(
             BlockKindData::Table {
                 aligns: vec![ColumnAlign::None; cols],
+                delimiter_row: None,
             },
             vec![header, body],
         );

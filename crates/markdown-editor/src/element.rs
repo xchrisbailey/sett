@@ -550,7 +550,9 @@ impl Element for EditorRoot {
                         table: *table,
                         grid: super::table::grid(doc, *table),
                         aligns: match doc.kind(*table) {
-                            Some(super::kind::BlockKindData::Table { aligns }) => aligns.clone(),
+                            Some(super::kind::BlockKindData::Table { aligns, .. }) => {
+                                aligns.clone()
+                            }
                             _ => Vec::new(),
                         },
                     })

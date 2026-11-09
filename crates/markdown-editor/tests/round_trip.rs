@@ -21,7 +21,7 @@ fn fixture(name: &str) -> String {
 }
 
 /// Fixtures whose bytes survive a load and save unchanged.
-const IDENTICAL: &[&str] = &["01-checklist.md", "07-long-note.md"];
+const IDENTICAL: &[&str] = &["01-checklist.md", "06-agent-daily.md", "07-long-note.md"];
 
 /// Fixtures that use syntax the serializer normalises (see FORK.md); they
 /// only have to settle after one save.
@@ -30,7 +30,6 @@ const NORMALISED: &[&str] = &[
     "03-code.md",
     "04-quote-and-marks.md",
     "05-headings.md",
-    "06-agent-daily.md",
 ];
 
 #[test]
@@ -101,6 +100,16 @@ fn list_markers_are_kept() {
         "> * quoted star\n",
         // Different markers make separate lists; they must not merge.
         "- dash\n\n* star\n",
+    ] {
+        assert_round_trips(source);
+    }
+}
+
+#[test]
+fn table_delimiter_rows_are_kept() {
+    for source in [
+        "| Time | Task |\n|------|------|\n| 09:12 | done |\n",
+        "| Price | Region |\n|------:|:------:|\n| 4 | EU |\n",
     ] {
         assert_round_trips(source);
     }

@@ -56,6 +56,9 @@ pub(crate) enum BlockKindData {
     },
     Table {
         aligns: Vec<ColumnAlign>,
+        /// FORK: the delimiter row as written (`|---|:--:|`), reused on save
+        /// while it still matches the columns and their alignment.
+        delimiter_row: Option<SharedString>,
     },
     TableRow,
     TableCell,

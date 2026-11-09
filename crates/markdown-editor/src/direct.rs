@@ -179,7 +179,7 @@ impl NodeCache {
                     .with_leaf_key(id.as_u64());
                 BlockNode::CodeBlock(code)
             }
-            BlockKindData::Table { aligns } => BlockNode::Table(Table::new(
+            BlockKindData::Table { aligns, .. } => BlockNode::Table(Table::new(
                 doc.children(id)
                     .iter()
                     .map(|row| self.row(doc, *row))

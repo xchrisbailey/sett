@@ -220,6 +220,7 @@ pub(crate) fn import_block(
             DetachedBlock::container(
                 BlockKindData::Table {
                     aligns: table.column_aligns().to_vec(),
+                    delimiter_row: delimiter_row(source, node.span()),
                 },
                 rows,
             )
@@ -248,6 +249,16 @@ pub(crate) fn import_block(
         BlockNode::Unknown | _ => leaf(BlockKindData::Unknown, BlockContent::Atom(AtomData::None)),
     };
     out.push(block);
+}
+
+/// FORK: the second line of the table at `span`, as written. Inside a
+/// container the line still carries its prefix (`> `), which the serializer
+/// adds itself, so only an unprefixed row is kept.
+fn delimiter_row(source: &str, span: Option<Span>) -> Option<SharedString> {
+    let table = source.get(span?.start..span?.end)?;
+    let row = table.lines().nth(1)?.trim_end();
+    row.starts_with(['|', '-', ':'])
+        .then(|| SharedString::from(row.to_string()))
 }
 
 /// FORK: the marker the list starting at `span` was written with: the

@@ -122,7 +122,13 @@ fn block(doc: &EditorDocument, id: BlockId) -> String {
             let fence = delimiter.to_string().repeat(longest.max(2) + 1);
             format!("{fence}{info}\n{code}\n{fence}")
         }
-        (BlockKindData::Table { aligns }, _) => {
+        (
+            BlockKindData::Table {
+                aligns,
+                delimiter_row,
+            },
+            _,
+        ) => {
             let mut lines = Vec::new();
             for (row_ix, row) in children.iter().enumerate() {
                 let cells: Vec<String> = doc
@@ -141,6 +147,12 @@ fn block(doc: &EditorDocument, id: BlockId) -> String {
                 let width = cells.len();
                 lines.push(format!("| {} |", cells.join(" | ")));
                 if row_ix == 0 {
+                    if let Some(row) = delimiter_row
+                        && delimiter_row_matches(row, aligns, width)
+                    {
+                        lines.push(row.to_string());
+                        continue;
+                    }
                     let delimiters: Vec<&str> = (0..width)
                         .map(|ix| match aligns.get(ix).copied().unwrap_or_default() {
                             ColumnAlign::None => "---",
@@ -185,6 +197,25 @@ fn block(doc: &EditorDocument, id: BlockId) -> String {
         // Documented lossiness: `Unknown` has no source to write back.
         _ => String::new(),
     }
+}
+
+/// FORK: whether a delimiter row kept from the source still describes
+/// `width` columns aligned as `aligns`.
+fn delimiter_row_matches(row: &str, aligns: &[ColumnAlign], width: usize) -> bool {
+    let row = row.trim();
+    let row = row.strip_prefix('|').unwrap_or(row);
+    let row = row.strip_suffix('|').unwrap_or(row);
+    let cells: Vec<&str> = row.split('|').map(str::trim).collect();
+    cells.len() == width
+        && cells.iter().enumerate().all(|(ix, cell)| {
+            let written = match (cell.starts_with(':'), cell.ends_with(':')) {
+                (true, true) => ColumnAlign::Center,
+                (true, false) => ColumnAlign::Left,
+                (false, true) => ColumnAlign::Right,
+                (false, false) => ColumnAlign::None,
+            };
+            written == aligns.get(ix).copied().unwrap_or_default()
+        })
 }
 
 /// A list item with continuation lines indented by the marker width.

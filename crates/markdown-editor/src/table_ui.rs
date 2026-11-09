@@ -188,7 +188,7 @@ impl BlockEditorState {
             return None;
         };
         match self.model.doc.kind(menu.table) {
-            Some(super::kind::BlockKindData::Table { aligns }) => {
+            Some(super::kind::BlockKindData::Table { aligns, .. }) => {
                 Some(aligns.get(c).copied().unwrap_or_default())
             }
             _ => None,
