@@ -30,6 +30,12 @@ pub(crate) enum ItemRef {
         space: Space,
         date: Date,
     },
+    /// The Task view shows the title itself, above the Task's fields.
+    Task {
+        space: Space,
+        project: String,
+        slug: String,
+    },
 }
 
 impl ItemRef {
@@ -43,7 +49,9 @@ impl ItemRef {
 
     fn space(&self) -> Space {
         match self {
-            ItemRef::Note { space, .. } | ItemRef::Journal { space, .. } => *space,
+            ItemRef::Note { space, .. }
+            | ItemRef::Journal { space, .. }
+            | ItemRef::Task { space, .. } => *space,
         }
     }
 }
@@ -53,6 +61,7 @@ impl ItemRef {
 enum Version {
     Note(Note),
     Journal(JournalEntry),
+    Task(sett_store::Task),
 }
 
 impl Version {
@@ -60,6 +69,7 @@ impl Version {
         match self {
             Version::Note(note) => Some(&note.title),
             Version::Journal(_) => None,
+            Version::Task(task) => Some(&task.title),
         }
     }
 
@@ -67,6 +77,7 @@ impl Version {
         match self {
             Version::Note(note) => &note.body,
             Version::Journal(entry) => &entry.body,
+            Version::Task(task) => &task.body,
         }
     }
 
@@ -176,6 +187,11 @@ impl ItemEditor {
         self.item.as_ref()
     }
 
+    /// The title box, for a host that lays the title out itself.
+    pub(crate) fn title_input(&self) -> &Entity<InputState> {
+        &self.title
+    }
+
     /// Opens `item`, saving the one open before if it has edits. A Journal
     /// Entry without a file opens empty and stays in memory until typed in.
     pub(crate) fn open(&mut self, item: ItemRef, window: &mut Window, cx: &mut Context<Self>) {
@@ -245,13 +261,7 @@ impl ItemEditor {
         let workspace = self.workspace.clone();
         let saved = match base {
             Version::Note(mut note) => {
-                let title = self.title.read(cx).value();
-                let title = title.trim();
-                note.title = if title.is_empty() {
-                    "Untitled".to_string()
-                } else {
-                    title.to_string()
-                };
+                note.title = self.title_or_untitled(cx);
                 note.body = self.body.clone();
                 workspace.update(cx, |w, cx| w.save_note(&mut note, cx))?;
                 Version::Note(note)
@@ -261,11 +271,27 @@ impl ItemEditor {
                 workspace.update(cx, |w, cx| w.save_journal_entry(&mut entry, cx))?;
                 Version::Journal(entry)
             }
+            Version::Task(mut task) => {
+                task.title = self.title_or_untitled(cx);
+                task.body = self.body.clone();
+                workspace.update(cx, |w, cx| w.save_task(&mut task, cx))?;
+                Version::Task(task)
+            }
         };
         self.seen = Some(saved.clone());
         self.base = Some(saved);
         self.dirty = false;
         Ok(())
+    }
+
+    fn title_or_untitled(&self, cx: &App) -> String {
+        let title = self.title.read(cx).value();
+        let title = title.trim();
+        if title.is_empty() {
+            "Untitled".to_string()
+        } else {
+            title.to_string()
+        }
     }
 
     /// Follows the Workspace: the editor mode, a Space switch, and outside
@@ -421,16 +447,19 @@ impl ItemEditor {
             ItemRef::Journal { date, .. } => {
                 index.journal_entry(*date).cloned().map(Version::Journal)
             }
+            ItemRef::Task { project, slug, .. } => {
+                index.task(project, slug).cloned().map(Version::Task)
+            }
         }
     }
 
-    /// A Journal Entry with no file is simply empty; a Note must exist.
+    /// A Journal Entry with no file is simply empty; a Note or Task must exist.
     fn empty_version(&self) -> Option<Version> {
         match self.item.as_ref()? {
             ItemRef::Journal { space, date } => {
                 Some(Version::Journal(JournalEntry::new(*space, *date)))
             }
-            ItemRef::Note { .. } => None,
+            ItemRef::Note { .. } | ItemRef::Task { .. } => None,
         }
     }
 
@@ -522,6 +551,7 @@ impl Render for ItemEditor {
                 .text_sm()
                 .text_color(cx.theme().muted_foreground)
                 .child(format_date(*date)),
+            ItemRef::Task { .. } => div(),
         };
         v_flex()
             .size_full()

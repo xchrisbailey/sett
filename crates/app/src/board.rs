@@ -12,17 +12,24 @@ use gpui_kit::component::{
     ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _, WindowExt as _, h_flex, v_flex,
 };
 use gpui_kit::{
-    AnyElement, AppContext as _, Context, ElementId, Entity, EventEmitter, Focusable as _,
-    InteractiveElement as _, IntoElement, ParentElement as _, Render, Role, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Subscription, TestSupportExt as _, Window, div,
-    prelude::FluentBuilder as _,
+    AnyElement, App, AppContext as _, Context, ElementId, Entity, EventEmitter, FocusHandle,
+    Focusable as _, InteractiveElement as _, IntoElement, KeyBinding, ParentElement as _, Render,
+    Role, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription,
+    TestSupportExt as _, Window, actions, div, prelude::FluentBuilder as _,
 };
 use sett_store::{Board, BoardColumn, Date, Task};
 
 use crate::workspace::{Selection, Workspace, today};
 
-/// What the Board tells its owner. The Task view (issue #9) will listen for
-/// `OpenTask`.
+actions!(sett, [OpenCard]);
+
+const CARD_CONTEXT: &str = "Card";
+
+pub(crate) fn init(cx: &mut App) {
+    cx.bind_keys([KeyBinding::new("enter", OpenCard, Some(CARD_CONTEXT))]);
+}
+
+/// What the Board tells its owner.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BoardEvent {
     OpenTask { project: String, slug: String },
@@ -38,6 +45,8 @@ pub(crate) struct BoardView {
     selected_task: Option<String>,
     /// Quick-add boxes by Column name.
     quick_adds: HashMap<String, QuickAdd>,
+    /// Lets Tab reach each Card and Enter open it, by Task slug.
+    card_focus: HashMap<String, FocusHandle>,
     column_dialog: Option<Subscription>,
     _observe: Subscription,
 }
@@ -90,6 +99,7 @@ impl BoardView {
             show_all_done: false,
             selected_task: None,
             quick_adds: HashMap::new(),
+            card_focus: HashMap::new(),
             column_dialog: None,
             _observe: observe,
         };
@@ -111,11 +121,25 @@ impl BoardView {
             .and_then(|p| workspace.index().project(p))
             .map(|p| p.columns.clone())
             .unwrap_or_default();
+        let slugs: Vec<String> = project
+            .as_deref()
+            .map(|p| workspace.index().tasks(p))
+            .unwrap_or_default()
+            .into_iter()
+            .map(|t| t.slug.clone())
+            .collect();
         if project != self.project {
             self.project = project;
             self.show_all_done = false;
             self.selected_task = None;
             self.quick_adds.clear();
+            self.card_focus.clear();
+        }
+        self.card_focus.retain(|slug, _| slugs.contains(slug));
+        for slug in slugs {
+            self.card_focus
+                .entry(slug)
+                .or_insert_with(|| cx.focus_handle().tab_stop(true));
         }
         self.quick_adds.retain(|name, _| columns.contains(name));
         for column in columns {
@@ -191,6 +215,14 @@ impl BoardView {
             project,
             slug: slug.to_string(),
         });
+        cx.notify();
+    }
+
+    /// Focuses a Card, for when its Task view closes.
+    pub(crate) fn focus_card(&mut self, slug: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(handle) = self.card_focus.get(slug) {
+            handle.focus(window, cx);
+        }
         cx.notify();
     }
 
@@ -480,7 +512,9 @@ impl BoardView {
         });
         let has_meta = due.is_some() || checklist.is_some();
 
-        let click_slug = slug.clone();
+        let (click_slug, key_slug) = (slug.clone(), slug.clone());
+        let focus = self.card_focus.get(&slug).cloned();
+        let ring = theme.ring;
         let (drop_column, drop_before) = (column.to_string(), slug.clone());
         v_flex()
             .id(ElementId::Name(format!("card-{slug}").into()))
@@ -498,6 +532,10 @@ impl BoardView {
             } else {
                 theme.background
             })
+            .when_some(focus, |card, focus| card.track_focus(&focus))
+            .key_context(CARD_CONTEXT)
+            .focus_visible(move |style| style.border_color(ring))
+            .on_action(cx.listener(move |this, _: &OpenCard, _, cx| this.open_task(&key_slug, cx)))
             .on_click(cx.listener(move |this, _, _, cx| this.open_task(&click_slug, cx)))
             .on_drag(
                 DraggedCard {

@@ -9,6 +9,7 @@ mod nav;
 mod notes;
 mod project_dialog;
 mod shell;
+mod task_view;
 mod workspace;
 
 pub use board::BoardEvent;
@@ -23,5 +24,7 @@ pub use workspace::{Selection, Workspace};
 /// `set_menus`.
 pub fn init(cx: &mut gpui_kit::App) {
     markdown_editor::init(cx);
+    board::init(cx);
     shell::init(cx);
+    task_view::init(cx);
 }

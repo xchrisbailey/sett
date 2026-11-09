@@ -318,6 +318,38 @@ impl Workspace {
         Ok(())
     }
 
+    /// Writes a Task. It may belong to a Space that is no longer active when
+    /// an edit is saved on the way out of it.
+    pub fn save_task(
+        &mut self,
+        task: &mut sett_store::Task,
+        cx: &mut Context<Self>,
+    ) -> io::Result<()> {
+        self.store.save_task(task)?;
+        if task.space == self.space() {
+            self.apply_change(task_change(&task.project, &task.slug), cx);
+        }
+        Ok(())
+    }
+
+    /// Sets or clears a Task's due date, writing only that Task's file.
+    pub fn set_task_due(
+        &mut self,
+        project: &str,
+        slug: &str,
+        due: Option<Date>,
+        cx: &mut Context<Self>,
+    ) -> io::Result<()> {
+        let mut task = self.index.task(project, slug).cloned().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, format!("task {slug} not found"))
+        })?;
+        if task.due == due {
+            return Ok(());
+        }
+        task.due = due;
+        self.save_task(&mut task, cx)
+    }
+
     pub fn add_column(
         &mut self,
         project: &str,

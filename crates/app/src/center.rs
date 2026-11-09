@@ -1,3 +1,4 @@
+use gpui_kit::component::breadcrumb::{Breadcrumb, BreadcrumbItem};
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{ActiveTheme as _, StyledExt as _, h_flex, v_flex};
 use gpui_kit::{
@@ -6,9 +7,10 @@ use gpui_kit::{
     Subscription, TestSupportExt as _, Window, div,
 };
 
-use crate::board::BoardView;
+use crate::board::{BoardEvent, BoardView};
 use crate::item_editor::{ItemEditor, ItemRef};
 use crate::notes::{NotesScope, NotesView};
+use crate::task_view::{TaskView, TaskViewEvent};
 use crate::workspace::{Selection, Workspace, today};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -19,17 +21,19 @@ enum ProjectTab {
 }
 
 /// Shows whatever the nav has selected: today's Journal Entry, the Notes
-/// list, or a Project's Board or Notes.
+/// list, or a Project's Board (or one of its Tasks) or Notes.
 pub(crate) struct CenterPanel {
     workspace: Entity<Workspace>,
     board: Entity<BoardView>,
+    /// Shown in place of the Board while a Task is open.
+    task: Entity<TaskView>,
     notes: Entity<NotesView>,
     project_notes: Entity<NotesView>,
     journal: Entity<ItemEditor>,
     project_tab: ProjectTab,
     /// What was showing at the last sync, to notice leaving it.
     shown: Option<(Selection, ProjectTab)>,
-    _observe: Subscription,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl CenterPanel {
@@ -43,6 +47,22 @@ impl CenterPanel {
             cx.notify();
         });
         let board = cx.new(|cx| BoardView::new(workspace.clone(), window, cx));
+        let task = cx.new(|cx| TaskView::new(workspace.clone(), window, cx));
+        let subscriptions = vec![
+            observe,
+            cx.subscribe_in(&board, window, |this, _, event, window, cx| {
+                let BoardEvent::OpenTask { project, slug } = event;
+                this.task
+                    .update(cx, |task, cx| task.open(project, slug, window, cx));
+                cx.notify();
+            }),
+            cx.subscribe_in(&task, window, |this, _, event, window, cx| {
+                let TaskViewEvent::Close { slug } = event;
+                this.board
+                    .update(cx, |board, cx| board.focus_card(slug, window, cx));
+                cx.notify();
+            }),
+        ];
         let notes = cx.new(|cx| NotesView::new(workspace.clone(), NotesScope::Space, window, cx));
         let project_notes =
             cx.new(|cx| NotesView::new(workspace.clone(), NotesScope::SelectedProject, window, cx));
@@ -50,12 +70,13 @@ impl CenterPanel {
         let mut panel = CenterPanel {
             workspace,
             board,
+            task,
             notes,
             project_notes,
             journal,
             project_tab: ProjectTab::default(),
             shown: None,
-            _observe: observe,
+            _subscriptions: subscriptions,
         };
         panel.sync(window, cx);
         panel
@@ -76,6 +97,7 @@ impl CenterPanel {
             .update(cx, |notes, cx| notes.flush(window, cx));
         self.journal
             .update(cx, |journal, cx| journal.flush(window, cx));
+        self.task.update(cx, |task, cx| task.close(window, cx));
         if selection == Selection::Journal {
             let today = ItemRef::Journal {
                 space,
@@ -87,6 +109,19 @@ impl CenterPanel {
     }
 
     fn render_header(&self, title: SharedString, cx: &Context<Self>) -> Div {
+        self.render_header_bar(cx).child(
+            div()
+                .id("center-title")
+                .role(Role::Heading)
+                .test_support()
+                .aria_label(title.clone())
+                .text_lg()
+                .font_semibold()
+                .child(title),
+        )
+    }
+
+    fn render_header_bar(&self, cx: &Context<Self>) -> Div {
         h_flex()
             .px_4()
             .h_12()
@@ -94,16 +129,26 @@ impl CenterPanel {
             .gap_4()
             .border_b_1()
             .border_color(cx.theme().border)
-            .child(
-                div()
-                    .id("center-title")
-                    .role(Role::Heading)
-                    .test_support()
-                    .aria_label(title.clone())
-                    .text_lg()
-                    .font_semibold()
-                    .child(title),
-            )
+    }
+
+    /// `<project> › Board › <task>`, where the first two go back to the Board.
+    fn render_breadcrumb(&self, project: SharedString, cx: &mut Context<Self>) -> Div {
+        let task = self.task.read(cx).title(cx);
+        let task_view = self.task.downgrade();
+        let back = move || {
+            let task_view = task_view.clone();
+            move |_: &_, window: &mut Window, cx: &mut gpui_kit::App| {
+                task_view.update(cx, |task, cx| task.close(window, cx)).ok();
+            }
+        };
+        self.render_header_bar(cx).child(
+            div().id("task-breadcrumb").test_support().child(
+                Breadcrumb::new()
+                    .child(BreadcrumbItem::new(project).on_click(back()))
+                    .child(BreadcrumbItem::new("Board").on_click(back()))
+                    .child(BreadcrumbItem::new(task)),
+            ),
+        )
     }
 
     fn render_placeholder(&self, text: &'static str, cx: &Context<Self>) -> impl IntoElement {
@@ -136,13 +181,20 @@ impl CenterPanel {
             }))
             .child(Tab::new().label("Board"))
             .child(Tab::new().label("Notes"));
+        let task_open = self.project_tab == ProjectTab::Board && self.task.read(cx).is_open();
         let body = match self.project_tab {
+            ProjectTab::Board if task_open => self.task.clone().into_any_element(),
             ProjectTab::Board => self.board.clone().into_any_element(),
             ProjectTab::Notes => self.project_notes.clone().into_any_element(),
         };
+        let header = if task_open {
+            self.render_breadcrumb(name, cx)
+        } else {
+            self.render_header(name, cx).child(tabs)
+        };
         v_flex()
             .size_full()
-            .child(self.render_header(name, cx).child(tabs))
+            .child(header)
             .child(div().flex_1().min_h_0().child(body))
             .into_any_element()
     }
