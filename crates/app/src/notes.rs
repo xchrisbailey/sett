@@ -13,7 +13,7 @@ use gpui_kit::{
     IntoElement, ParentElement as _, Render, Role, SharedString, StatefulInteractiveElement as _,
     Styled as _, Subscription, TestSupportExt as _, Window, div, prelude::FluentBuilder as _,
 };
-use sett_store::{Note, Space};
+use sett_store::{ItemId, Note, Space};
 
 use crate::app_model::{AppModel, Selection};
 use crate::item_editor::{ItemEditor, ItemRef};
@@ -93,6 +93,12 @@ impl NotesView {
         let item = ItemRef::note(space, project.as_deref(), slug);
         self.editor
             .update(cx, |editor, cx| editor.open(item, window, cx));
+        let id = ItemId::Note {
+            project,
+            slug: slug.to_string(),
+        };
+        self.model
+            .update(cx, |model, _| model.set_open_item(Some(id)));
     }
 
     /// Opens a Note of whatever the list now shows, which may have just

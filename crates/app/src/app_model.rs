@@ -32,7 +32,7 @@ pub enum AppModelEvent {
 }
 
 /// The open data root and the active Space: its index, kept current by a
-/// watcher, and each Space's last selection. Only the active Space is indexed
+/// watcher, and each Space's last selection and open Item. Only the active Space is indexed
 /// and watched, so nothing from the other Space is held (ADR 0002).
 pub struct AppModel {
     store: Store,
@@ -40,6 +40,8 @@ pub struct AppModel {
     settings_path: Option<PathBuf>,
     index: SpaceIndex,
     selections: HashMap<Space, Selection>,
+    /// The Item open in each Space, reopened when switching back to it.
+    open_items: HashMap<Space, ItemId>,
     /// `None` when the data root isn't watched, or watching it failed.
     watching: Option<Watching>,
 }
@@ -92,6 +94,7 @@ impl AppModel {
                 settings_path,
                 index,
                 selections: HashMap::new(),
+                open_items: HashMap::new(),
                 watching,
             }
         }))
@@ -112,26 +115,30 @@ impl AppModel {
             .unwrap_or_default()
     }
 
+    /// Selects a nav entry, which closes whatever Item was open.
     pub fn select(&mut self, selection: Selection, cx: &mut Context<Self>) {
         if self.selection() != selection {
             self.selections.insert(self.space(), selection);
+            self.open_items.remove(&self.space());
             cx.notify();
         }
+    }
+
+    /// Records which Item the active Space shows, or `None` once the user
+    /// goes back to a Board or list, so switching back to the Space
+    /// reopens it.
+    pub(crate) fn set_open_item(&mut self, item: Option<ItemId>) {
+        match item {
+            Some(item) => self.open_items.insert(self.space(), item),
+            None => self.open_items.remove(&self.space()),
+        };
     }
 
     /// Selects where an Item of the active Space lives and asks the view
     /// there to open it, as following a Link does.
     pub fn open_item(&mut self, item: ItemId, cx: &mut Context<Self>) {
-        let selection = match &item {
-            ItemId::Note { project: None, .. } => Selection::Notes,
-            ItemId::Note {
-                project: Some(project),
-                ..
-            }
-            | ItemId::Task { project, .. } => Selection::Project(project.clone()),
-            ItemId::Journal(_) => Selection::Journal,
-        };
-        self.selections.insert(self.space(), selection);
+        self.selections.insert(self.space(), selection_of(&item));
+        self.open_items.insert(self.space(), item.clone());
         cx.emit(AppModelEvent::OpenItem(item));
         cx.notify();
     }
@@ -147,7 +154,18 @@ impl AppModel {
         self.index = SpaceIndex::scan(&self.store, space);
         self.fix_selection();
         self.save_last_space(space);
-        cx.notify();
+        let reopen = self
+            .open_items
+            .get(&space)
+            .filter(|item| self.index.title(item).is_some())
+            .cloned();
+        match reopen {
+            Some(item) => self.open_item(item, cx),
+            None => {
+                self.open_items.remove(&space);
+                cx.notify();
+            }
+        }
     }
 
     /// Creates a Project in the active Space and opens it. Returns its slug.
@@ -483,6 +501,19 @@ pub(crate) fn today() -> Date {
         )
     };
     date().expect("the local date is a valid calendar date")
+}
+
+/// Where an Item lives in the nav.
+fn selection_of(item: &ItemId) -> Selection {
+    match item {
+        ItemId::Note { project: None, .. } => Selection::Notes,
+        ItemId::Note {
+            project: Some(project),
+            ..
+        }
+        | ItemId::Task { project, .. } => Selection::Project(project.clone()),
+        ItemId::Journal(_) => Selection::Journal,
+    }
 }
 
 fn note_change(project: Option<&str>, slug: &str) -> Change {

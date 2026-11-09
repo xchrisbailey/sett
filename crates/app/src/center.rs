@@ -185,7 +185,7 @@ impl CenterPanel {
         let back = move || {
             let task_view = task_view.clone();
             move |_: &_, window: &mut Window, cx: &mut gpui_kit::App| {
-                task_view.update(cx, |task, cx| task.close(window, cx)).ok();
+                task_view.update(cx, |task, cx| task.back(window, cx)).ok();
             }
         };
         self.render_header_bar(cx).child(
@@ -228,6 +228,7 @@ impl CenterPanel {
                 } else {
                     ProjectTab::Notes
                 };
+                this.model.update(cx, |model, _| model.set_open_item(None));
                 this.sync(None, window, cx);
                 cx.notify();
             }))

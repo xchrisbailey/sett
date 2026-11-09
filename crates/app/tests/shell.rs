@@ -119,3 +119,60 @@ fn apply_change(cx: &mut TestAppContext, f: &Fixture, change: Change) {
         model.update(cx, |model, cx| model.apply_change(change, cx));
     });
 }
+
+#[gpui_kit::test]
+fn each_space_reopens_its_last_open_item(cx: &mut TestAppContext) {
+    let f = open_shell(cx);
+    fs::write(
+        f.data_root.join("personal/notes/plan.md"),
+        "---\ntitle: Plan\n---\n",
+    )
+    .unwrap();
+    fs::write(
+        f.data_root.join("work/projects/inbox/tasks/deploy.md"),
+        "---\ntitle: Deploy\ncolumn: Todo\n---\n",
+    )
+    .unwrap();
+    apply_change(cx, &f, Change::All);
+
+    cx.update_window(f.window, |_, window, cx| {
+        window.render_frame(cx);
+        window.within("nav").click(NOTES, cx);
+        window.render_frame(cx);
+        window.click("note-plan", cx);
+
+        window.press("cmd-2", cx);
+        window.render_frame(cx);
+        window.click("card-deploy", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    let reopens = |cx: &mut TestAppContext, key: &str, id: &'static str, title: &str| {
+        cx.update_window(f.window, |_, window, cx| window.press(key, cx))
+            .unwrap();
+        cx.run_until_parked();
+        cx.update_window(f.window, |_, window, cx| {
+            window.render_frame(cx);
+            assert_eq!(window.find(id).value(), Some(title), "{key}");
+        })
+        .unwrap();
+    };
+    reopens(cx, "cmd-1", "note-title", "Plan");
+    reopens(cx, "cmd-2", "task-title", "Deploy");
+
+    // Going back to the Board makes the Board what's remembered.
+    cx.update_window(f.window, |_, window, cx| window.press("escape", cx))
+        .unwrap();
+    cx.run_until_parked();
+    reopens(cx, "cmd-1", "note-title", "Plan");
+    cx.update_window(f.window, |_, window, cx| window.press("cmd-2", cx))
+        .unwrap();
+    cx.run_until_parked();
+    cx.update_window(f.window, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("task-view").is_none());
+        assert!(window.try_find("card-deploy").is_some());
+    })
+    .unwrap();
+}

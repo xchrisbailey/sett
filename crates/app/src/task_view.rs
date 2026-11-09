@@ -15,7 +15,7 @@ use gpui_kit::{
     InteractiveElement as _, IntoElement, KeyBinding, ParentElement as _, Render, SharedString,
     Styled as _, Subscription, TestSupportExt as _, Window, actions, div,
 };
-use sett_store::{Board, Date, Space};
+use sett_store::{Board, Date, ItemId, Space};
 
 use crate::app_model::AppModel;
 use crate::item_editor::{ItemEditor, ItemRef};
@@ -141,9 +141,22 @@ impl TaskView {
             .update(cx, |editor, cx| editor.open(item, window, cx));
         self.task = Some((project.to_string(), slug.to_string()));
         self.space = space;
+        let id = ItemId::Task {
+            project: project.to_string(),
+            slug: slug.to_string(),
+        };
+        self.model
+            .update(cx, |model, _| model.set_open_item(Some(id)));
         self.shown = None;
         self.sync(window, cx);
         self.focus_handle.focus(window, cx);
+    }
+
+    /// Goes back to the Board at the user's request, which is then what the
+    /// Space reopens on.
+    pub(crate) fn back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.model.update(cx, |model, _| model.set_open_item(None));
+        self.close(window, cx);
     }
 
     /// Saves pending edits and asks the owner to show the Board.
@@ -277,7 +290,7 @@ impl Render for TaskView {
             .test_support()
             .key_context(CONTEXT)
             .track_focus(&self.focus_handle)
-            .on_action(cx.listener(|this, _: &CloseTask, window, cx| this.close(window, cx)))
+            .on_action(cx.listener(|this, _: &CloseTask, window, cx| this.back(window, cx)))
             .size_full()
             .min_h_0()
             .child(

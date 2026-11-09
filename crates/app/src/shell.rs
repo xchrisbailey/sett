@@ -68,7 +68,11 @@ impl Shell {
         &self.model
     }
 
-    fn show_space(&mut self, space: Space, cx: &mut Context<Self>) {
+    /// Switches Space and takes focus back, since whatever had it (an open
+    /// Task, say) may belong to the Space being left and stop rendering, which
+    /// would leave the Space shortcuts without a key context.
+    fn show_space(&mut self, space: Space, window: &mut Window, cx: &mut Context<Self>) {
+        self.focus_handle.focus(window, cx);
         self.model
             .update(cx, |model, cx| model.switch_space(space, cx));
     }
@@ -99,13 +103,13 @@ impl Shell {
                             .segmented()
                             .small()
                             .selected_index(selected)
-                            .on_click(cx.listener(|this, ix: &usize, _, cx| {
+                            .on_click(cx.listener(|this, ix: &usize, window, cx| {
                                 let space = if *ix == 0 {
                                     Space::Personal
                                 } else {
                                     Space::Work
                                 };
-                                this.show_space(space, cx);
+                                this.show_space(space, window, cx);
                             }))
                             .child(Tab::new().label("Personal"))
                             .child(Tab::new().label("Work")),
@@ -122,10 +126,12 @@ impl Render for Shell {
             .size_full()
             .key_context(CONTEXT)
             .track_focus(&self.focus_handle)
-            .on_action(
-                cx.listener(|this, _: &ShowPersonal, _, cx| this.show_space(Space::Personal, cx)),
-            )
-            .on_action(cx.listener(|this, _: &ShowWork, _, cx| this.show_space(Space::Work, cx)))
+            .on_action(cx.listener(|this, _: &ShowPersonal, window, cx| {
+                this.show_space(Space::Personal, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ShowWork, window, cx| {
+                this.show_space(Space::Work, window, cx)
+            }))
             .on_action(cx.listener(|this, _: &ToggleEditorMode, _, cx| {
                 this.model
                     .update(cx, |model, cx| model.toggle_editor_mode(cx))
