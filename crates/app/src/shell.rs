@@ -135,11 +135,11 @@ impl Render for Shell {
             }))
             .when_some(selected, |this, (slug, archived)| {
                 let model = self.model.clone();
-                let (edit_ws, edit_slug) = (model.clone(), slug.clone());
-                let (delete_ws, delete_slug) = (model.clone(), slug.clone());
+                let (edit_model, edit_slug) = (model.clone(), slug.clone());
+                let (delete_model, delete_slug) = (model.clone(), slug.clone());
                 this.on_action(move |_: &EditProject, window, cx| {
                     project_dialog::open_edit_project(
-                        edit_ws.clone(),
+                        edit_model.clone(),
                         edit_slug.clone(),
                         window,
                         cx,
@@ -147,7 +147,7 @@ impl Render for Shell {
                 })
                 .on_action(move |_: &DeleteProject, window, cx| {
                     project_dialog::confirm_delete_project(
-                        delete_ws.clone(),
+                        delete_model.clone(),
                         delete_slug.clone(),
                         window,
                         cx,
