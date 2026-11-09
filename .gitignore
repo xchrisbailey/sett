@@ -1,0 +1,33 @@
+# Rust build output (Cargo.lock stays committed since this is an app)
+/target/
+**/*.rs.bk
+*.pdb
+
+# macOS app bundling / packaging output
+/dist/
+*.dmg
+
+# Profiling and debugging artifacts
+*.profraw
+*.profdata
+flamegraph.svg
+perf.data*
+
+# Local env
+.env
+.env.*
+
+# Editors / IDEs
+.idea/
+.vscode/
+.zed/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Agent local state (skills under .agents/ and .claude/skills/ stay tracked)
+.claude/settings.local.json
+.scratch/
