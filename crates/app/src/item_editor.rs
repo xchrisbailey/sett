@@ -14,6 +14,7 @@ use markdown_editor::{BlockEditor, BlockEditorEvent, BlockEditorState};
 use sett_store::{Date, EditorMode, JournalEntry, Note, Space};
 
 use crate::app_model::AppModel;
+use crate::dates::to_chrono;
 use crate::item_links::ItemLinks;
 use crate::notice::frontmatter_notice;
 
@@ -537,13 +538,9 @@ impl ItemEditor {
 
 /// A long local date such as "Monday, 9 November 2026".
 fn format_date(date: Date) -> String {
-    chrono::NaiveDate::from_ymd_opt(
-        i32::from(date.year()),
-        u32::from(date.month()),
-        u32::from(date.day()),
-    )
-    .map(|d| d.format("%A, %-d %B %Y").to_string())
-    .unwrap_or_else(|| date.to_string())
+    to_chrono(date)
+        .map(|d| d.format("%A, %-d %B %Y").to_string())
+        .unwrap_or_else(|| date.to_string())
 }
 
 fn report(err: io::Error, window: &mut Window, cx: &mut App) {

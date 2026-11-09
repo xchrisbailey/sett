@@ -9,8 +9,9 @@ use gpui_kit::{
 
 use sett_store::{ItemId, Space};
 
-use crate::app_model::{AppModel, AppModelEvent, Selection, today};
+use crate::app_model::{AppModel, AppModelEvent, Selection};
 use crate::board::{BoardEvent, BoardView};
+use crate::dates::today;
 use crate::item_editor::{ItemEditor, ItemRef};
 use crate::notes::{NotesScope, NotesView};
 use crate::notice::frontmatter_notice;

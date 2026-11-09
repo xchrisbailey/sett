@@ -8,6 +8,8 @@ use sett_store::{
     Space, SpaceIndex, Store, Update, Watcher,
 };
 
+use crate::dates::today;
+
 /// What the center panel shows for the active Space.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Selection {
@@ -501,21 +503,6 @@ impl AppModel {
             eprintln!("sett: couldn't save settings to {}: {err}", path.display());
         }
     }
-}
-
-/// The local calendar date, which decides when a Task was done and whether
-/// it is overdue.
-pub(crate) fn today() -> Date {
-    use chrono::Datelike as _;
-    let now = chrono::Local::now().date_naive();
-    let date = || {
-        Date::new(
-            u16::try_from(now.year()).ok()?,
-            u8::try_from(now.month()).ok()?,
-            u8::try_from(now.day()).ok()?,
-        )
-    };
-    date().expect("the local date is a valid calendar date")
 }
 
 /// Where an Item lives in the nav.

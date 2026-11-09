@@ -1,6 +1,5 @@
 use std::io;
 
-use chrono::Datelike as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::calendar::Date as PickerDate;
 use gpui_kit::component::date_picker::{DatePicker, DatePickerEvent, DatePickerState};
@@ -20,6 +19,7 @@ use sett_store::{Board, Date, ItemId, Space};
 
 use crate::app_model::AppModel;
 use crate::confirm_delete::{ITEM_CONSEQUENCE, confirm_delete};
+use crate::dates::{from_chrono, to_chrono};
 use crate::item_editor::{ItemEditor, ItemRef};
 
 actions!(sett, [CloseTask]);
@@ -92,7 +92,7 @@ impl TaskView {
             ),
             cx.subscribe_in(&due, window, |this, _, event, window, cx| {
                 let DatePickerEvent::Change(value) = event;
-                let due = value.start().and_then(store_date);
+                let due = value.start().and_then(from_chrono);
                 this.set_due(due, window, cx);
             }),
             cx.observe_in(&model, window, |this, _, window, cx| this.sync(window, cx)),
@@ -210,7 +210,7 @@ impl TaskView {
             select.set_items(SearchableVec::new(items), window, cx);
             select.set_selected_value(&SharedString::from(column), window, cx);
         });
-        let date = PickerDate::Single(due.and_then(picker_date));
+        let date = PickerDate::Single(due.and_then(to_chrono));
         self.due
             .update(cx, |picker, cx| picker.set_date(date, window, cx));
         cx.notify();
@@ -281,23 +281,6 @@ impl TaskView {
             )
             .child(div().w_56().child(control))
     }
-}
-
-/// The picker works in chrono dates; sett-store has its own `Date`.
-fn picker_date(date: Date) -> Option<chrono::NaiveDate> {
-    chrono::NaiveDate::from_ymd_opt(
-        i32::from(date.year()),
-        u32::from(date.month()),
-        u32::from(date.day()),
-    )
-}
-
-fn store_date(date: chrono::NaiveDateTime) -> Option<Date> {
-    Date::new(
-        u16::try_from(date.year()).ok()?,
-        u8::try_from(date.month()).ok()?,
-        u8::try_from(date.day()).ok()?,
-    )
 }
 
 fn show_error(what: &str, err: io::Error, window: &mut Window, cx: &mut App) {

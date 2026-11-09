@@ -19,8 +19,9 @@ use gpui_kit::{
 };
 use sett_store::{Board, BoardColumn, Date, Task};
 
-use crate::app_model::{AppModel, Selection, today};
+use crate::app_model::{AppModel, Selection};
 use crate::confirm_delete::{ITEM_CONSEQUENCE, confirm_delete};
+use crate::dates::{to_chrono, today};
 
 actions!(sett, [OpenCard]);
 
@@ -691,11 +692,7 @@ impl Render for BoardView {
 
 /// `Mar 4`, or `Mar 4, 2027` outside the current year.
 fn format_date(date: Date, today: Date) -> String {
-    let Some(naive) = chrono::NaiveDate::from_ymd_opt(
-        i32::from(date.year()),
-        u32::from(date.month()),
-        u32::from(date.day()),
-    ) else {
+    let Some(naive) = to_chrono(date) else {
         return date.to_string();
     };
     if date.year() == today.year() {
