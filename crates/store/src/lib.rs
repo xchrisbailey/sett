@@ -17,6 +17,7 @@ mod watch;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use serde_yaml_ng::{Mapping, Value};
 
@@ -30,6 +31,7 @@ pub use watch::Watcher;
 use watch::WriteLog;
 
 pub const INBOX_SLUG: &str = "inbox";
+const DEFAULT_ICON: &str = "folder";
 const DEFAULT_COLUMNS: [&str; 3] = ["Todo", "Doing", "Done"];
 const AGENTS_MD: &str = include_str!("agents.md");
 
@@ -103,9 +105,13 @@ impl Project {
     }
 }
 
+/// Moves a file or folder out of the data root.
+type TrashFn = Arc<dyn Fn(&Path) -> io::Result<()> + Send + Sync>;
+
 pub struct Store {
     root: PathBuf,
     log: WriteLog,
+    trash: TrashFn,
 }
 
 impl Store {
@@ -114,6 +120,7 @@ impl Store {
         let store = Store {
             root: root.into(),
             log: WriteLog::default(),
+            trash: Arc::new(|path| trash::delete(path).map_err(io::Error::other)),
         };
         if !store.root.exists() {
             store.first_run()?;
@@ -123,6 +130,12 @@ impl Store {
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// Replaces how `trash_*` disposes of files, which by default moves them
+    /// to the macOS Trash. Tests use this to keep the real Trash untouched.
+    pub fn set_trash(&mut self, trash: impl Fn(&Path) -> io::Result<()> + Send + Sync + 'static) {
+        self.trash = Arc::new(trash);
     }
 
     fn first_run(&self) -> io::Result<()> {
@@ -221,14 +234,22 @@ impl Store {
         entries
     }
 
-    /// Creates a Project with the default Columns. Its slug comes from `name`.
-    pub fn create_project(&self, space: Space, name: &str) -> io::Result<Project> {
+    /// Creates a Project with the default Columns. Its slug comes from `name`,
+    /// and it gets the folder icon unless `icon` names another.
+    pub fn create_project(
+        &self,
+        space: Space,
+        name: &str,
+        icon: Option<&str>,
+    ) -> io::Result<Project> {
         let slug = slug::unique_slug(&self.projects_dir(space), &slug::slugify(name), |dir, s| {
             dir.join(s).exists()
         });
         let mut project = Project::from_doc(space, &slug, Document::default());
         project.name = name.to_string();
+        project.icon = Some(icon.unwrap_or(DEFAULT_ICON).to_string());
         self.write_project(&project)?;
+        project.fields = project.to_doc().fields;
         Ok(project)
     }
 
@@ -466,7 +487,7 @@ impl Store {
 
     fn trash(&self, path: &Path) -> io::Result<()> {
         self.log.removed(self.rel(path), path);
-        trash::delete(path).map_err(io::Error::other)
+        (self.trash)(path)
     }
 
     /// The write log is keyed relative to the root so it matches the

@@ -3,12 +3,18 @@
 
 mod board;
 mod center;
+mod icons;
 mod nav;
+mod project_dialog;
 mod shell;
 mod workspace;
 
 pub use board::BoardEvent;
-pub use shell::{Shell, ShowPersonal, ShowWork};
+pub use icons::AppAssets;
+pub use shell::{
+    ArchiveProject, DeleteProject, EditProject, NewProject, Shell, ShowPersonal, ShowWork,
+    UnarchiveProject,
+};
 pub use workspace::{Selection, Workspace};
 
 /// Registers the app's key bindings. Call after `gpui_kit::init` and before

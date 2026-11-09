@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use gpui_kit::{App, AppContext as _, Context, Entity, Task};
 use sett_store::{
@@ -124,6 +124,85 @@ impl Workspace {
         cx.notify();
     }
 
+    /// Creates a Project in the active Space and opens it. Returns its slug.
+    pub fn create_project(
+        &mut self,
+        name: &str,
+        icon: Option<&str>,
+        cx: &mut Context<Self>,
+    ) -> io::Result<String> {
+        let project = self.store.create_project(self.space(), name, icon)?;
+        let slug = project.slug;
+        self.reload_project(&slug, cx);
+        self.select(Selection::Project(slug.clone()), cx);
+        Ok(slug)
+    }
+
+    /// Renames a Project or changes its icon. The slug, and so its folder,
+    /// stays the same.
+    pub fn update_project(
+        &mut self,
+        slug: &str,
+        name: &str,
+        icon: Option<&str>,
+        cx: &mut Context<Self>,
+    ) -> io::Result<()> {
+        self.edit_project(slug, cx, |project| {
+            project.name = name.to_string();
+            project.icon = icon.map(str::to_string);
+        })
+    }
+
+    /// Archiving only flags the Project in `project.md`; its files stay put.
+    pub fn set_archived(
+        &mut self,
+        slug: &str,
+        archived: bool,
+        cx: &mut Context<Self>,
+    ) -> io::Result<()> {
+        self.edit_project(slug, cx, |project| project.archived = archived)
+    }
+
+    /// Moves the Project's folder to the Trash. Links into it are left as
+    /// they are.
+    pub fn trash_project(&mut self, slug: &str, cx: &mut Context<Self>) -> io::Result<()> {
+        let project = self.find_project(slug)?.clone();
+        self.store.trash_project(&project)?;
+        self.reload_project(slug, cx);
+        Ok(())
+    }
+
+    /// Replaces how deleted Projects are disposed of, which by default moves
+    /// them to the macOS Trash. Tests use this to keep the real Trash untouched.
+    pub fn set_trash(&mut self, trash: impl Fn(&Path) -> io::Result<()> + Send + Sync + 'static) {
+        self.store.set_trash(trash);
+    }
+
+    fn edit_project(
+        &mut self,
+        slug: &str,
+        cx: &mut Context<Self>,
+        edit: impl FnOnce(&mut Project),
+    ) -> io::Result<()> {
+        let mut project = self.find_project(slug)?.clone();
+        edit(&mut project);
+        self.store.save_project(&mut project)?;
+        self.reload_project(slug, cx);
+        Ok(())
+    }
+
+    fn find_project(&self, slug: &str) -> io::Result<&Project> {
+        self.index.project(slug).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, format!("project {slug} not found"))
+        })
+    }
+
+    /// sett's own writes aren't reported by the watcher, so the index is
+    /// brought up to date here instead.
+    fn reload_project(&mut self, slug: &str, cx: &mut Context<Self>) {
+        self.apply_change(Change::Project(slug.to_string()), cx);
+    }
+
     /// Brings the active Space's index in line with an outside change to it.
     pub fn apply_change(&mut self, change: Change, cx: &mut Context<Self>) {
         if self.index.apply(&self.store, &change) != Update::Unchanged {
@@ -143,7 +222,7 @@ impl Workspace {
         let task = self
             .store
             .create_task_in(self.space(), project, column, title, today())?;
-        self.reload(&[task_change(project, &task.slug)], cx);
+        self.reload(vec![task_change(project, &task.slug)], cx);
         Ok(())
     }
 
@@ -157,7 +236,7 @@ impl Workspace {
         before: Option<&str>,
         cx: &mut Context<Self>,
     ) -> io::Result<()> {
-        let columns = self.project_columns(project)?;
+        let columns = self.find_project(project)?.columns.clone();
         let board = Board::new(&columns, self.index.tasks(project));
         let written = self
             .store
@@ -166,7 +245,7 @@ impl Workspace {
             .iter()
             .map(|t| task_change(project, &t.slug))
             .collect();
-        self.reload(&changes, cx);
+        self.reload(changes, cx);
         Ok(())
     }
 
@@ -217,13 +296,6 @@ impl Workspace {
         })
     }
 
-    fn project_columns(&self, project: &str) -> io::Result<Vec<String>> {
-        self.index
-            .project(project)
-            .map(|p| p.columns.clone())
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "project not found"))
-    }
-
     /// Runs a Column edit, then reloads the whole Project, since an edit can
     /// rewrite any of its Tasks.
     fn edit_columns(
@@ -232,24 +304,18 @@ impl Workspace {
         cx: &mut Context<Self>,
         edit: impl FnOnce(&Store, &mut Project, Vec<&sett_store::Task>) -> io::Result<()>,
     ) -> io::Result<()> {
-        let mut project = self
-            .index
-            .project(slug)
-            .cloned()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "project not found"))?;
+        let mut project = self.find_project(slug)?.clone();
         let result = edit(&self.store, &mut project, self.index.tasks(slug));
         // Reload even on failure: an edit can fail after writing some files.
-        self.reload(&[Change::Project(slug.to_string())], cx);
+        self.reload_project(slug, cx);
         result
     }
 
-    /// sett's own writes never come back through the watcher, so the index
-    /// is brought up to date here instead.
-    fn reload(&mut self, changes: &[Change], cx: &mut Context<Self>) {
+    /// Like [`Workspace::reload_project`], for just the Tasks written.
+    fn reload(&mut self, changes: Vec<Change>, cx: &mut Context<Self>) {
         for change in changes {
-            self.index.apply(&self.store, change);
+            self.apply_change(change, cx);
         }
-        cx.notify();
     }
 
     /// A selected Project that was deleted or renamed on disk falls back to
