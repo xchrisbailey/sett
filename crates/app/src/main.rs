@@ -2,7 +2,10 @@ use std::path::Path;
 
 use gpui_kit::component::TitleBar;
 use gpui_kit::*;
-use sett::{Shell, ShowPersonal, ShowWork, Workspace};
+use sett::{
+    ArchiveProject, DeleteProject, EditProject, NewProject, Shell, ShowPersonal, ShowWork,
+    UnarchiveProject, Workspace,
+};
 use sett_store::Settings;
 
 actions!(sett, [Quit]);
@@ -15,7 +18,7 @@ fn main() {
         None => Settings::defaults(Path::new(&home)),
     };
 
-    application().with_assets(assets::Assets).run(move |cx| {
+    application().with_assets(sett::AppAssets).run(move |cx| {
         init(cx);
         sett::init(cx);
 
@@ -27,6 +30,15 @@ fn main() {
             Menu::new("Space").items([
                 MenuItem::action("Personal", ShowPersonal),
                 MenuItem::action("Work", ShowWork),
+            ]),
+            Menu::new("Project").items([
+                MenuItem::action("New Project\u{2026}", NewProject),
+                MenuItem::action("Edit Project\u{2026}", EditProject),
+                MenuItem::separator(),
+                MenuItem::action("Archive Project", ArchiveProject),
+                MenuItem::action("Unarchive Project", UnarchiveProject),
+                MenuItem::separator(),
+                MenuItem::action("Delete Project\u{2026}", DeleteProject),
             ]),
         ]);
 

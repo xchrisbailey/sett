@@ -120,7 +120,9 @@ fn own_writes_and_other_space_are_ignored() {
         .unwrap();
     t.title = "Renamed by sett".into();
     store.save_task(&mut t).unwrap();
-    let mut project = store.create_project(Space::Work, "Own project").unwrap();
+    let mut project = store
+        .create_project(Space::Work, "Own project", None)
+        .unwrap();
     project.name = "Still mine".into();
     store.save_project(&mut project).unwrap();
     store

@@ -1,8 +1,12 @@
-use gpui_kit::component::IconName;
+use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::component::sidebar::{Sidebar, SidebarMenu, SidebarMenuItem};
+use gpui_kit::component::{Icon, IconName, Sizable as _};
 use gpui_kit::{App, Entity, IntoElement, RenderOnce, SharedString, Window};
 use sett_store::Project;
 
+use crate::icons::project_icon;
+use crate::project_dialog;
 use crate::workspace::{Selection, Workspace};
 
 /// The left nav for the active Space: Journal and Notes, then the Projects
@@ -20,7 +24,7 @@ impl Nav {
     fn item(
         &self,
         label: impl Into<SharedString>,
-        icon: IconName,
+        icon: impl Into<Icon>,
         target: Selection,
         current: &Selection,
     ) -> SidebarMenuItem {
@@ -34,12 +38,58 @@ impl Nav {
     }
 
     fn project_item(&self, project: &Project, current: &Selection) -> SidebarMenuItem {
-        self.item(
+        let item = self.item(
             project.name.clone(),
             project_icon(project.icon.as_deref()),
             Selection::Project(project.slug.clone()),
             current,
-        )
+        );
+        // The Inbox can't be renamed, archived or deleted.
+        if project.is_inbox() {
+            return item;
+        }
+        let workspace = self.workspace.clone();
+        let slug = project.slug.clone();
+        let archived = project.archived;
+        item.context_menu(move |menu, _, _| {
+            let (edit_ws, edit_slug) = (workspace.clone(), slug.clone());
+            let (archive_ws, archive_slug) = (workspace.clone(), slug.clone());
+            let (delete_ws, delete_slug) = (workspace.clone(), slug.clone());
+            menu.item(
+                PopupMenuItem::new("Edit\u{2026}").on_click(move |_, window, cx| {
+                    project_dialog::open_edit_project(
+                        edit_ws.clone(),
+                        edit_slug.clone(),
+                        window,
+                        cx,
+                    )
+                }),
+            )
+            .item(
+                PopupMenuItem::new(if archived { "Unarchive" } else { "Archive" }).on_click(
+                    move |_, window, cx| {
+                        project_dialog::set_archived(
+                            &archive_ws,
+                            &archive_slug,
+                            !archived,
+                            window,
+                            cx,
+                        )
+                    },
+                ),
+            )
+            .separator()
+            .item(
+                PopupMenuItem::new("Delete\u{2026}").on_click(move |_, window, cx| {
+                    project_dialog::confirm_delete_project(
+                        delete_ws.clone(),
+                        delete_slug.clone(),
+                        window,
+                        cx,
+                    )
+                }),
+            )
+        })
     }
 }
 
@@ -53,8 +103,19 @@ impl RenderOnce for Nav {
             .into_iter()
             .partition(|p| p.archived);
 
+        let workspace = self.workspace.clone();
         let mut sidebar = Sidebar::new("nav")
             .collapsible(false)
+            .footer(
+                Button::new("new-project")
+                    .ghost()
+                    .small()
+                    .icon(IconName::Plus)
+                    .label("New project\u{2026}")
+                    .on_click(move |_, window, cx| {
+                        project_dialog::open_new_project(workspace.clone(), window, cx)
+                    }),
+            )
             .child(
                 SidebarMenu::new()
                     .child(self.item("Journal", IconName::BookOpen, Selection::Journal, &current))
@@ -76,29 +137,5 @@ impl RenderOnce for Nav {
             );
         }
         sidebar
-    }
-}
-
-/// Maps a Project's Lucide icon name onto the bundled default icons, falling
-/// back to a folder. The curated icon set replaces this (issue #6).
-fn project_icon(name: Option<&str>) -> IconName {
-    match name {
-        Some("inbox") => IconName::Inbox,
-        Some("book-open") => IconName::BookOpen,
-        Some("bot") => IconName::Bot,
-        Some("building-2") => IconName::Building2,
-        Some("calendar") => IconName::Calendar,
-        Some("cpu") => IconName::Cpu,
-        Some("file-text") => IconName::FileText,
-        Some("folder-open") => IconName::FolderOpen,
-        Some("github") => IconName::Github,
-        Some("globe") => IconName::Globe,
-        Some("heart") => IconName::Heart,
-        Some("layout-dashboard") => IconName::LayoutDashboard,
-        Some("map") => IconName::Map,
-        Some("palette") => IconName::Palette,
-        Some("star") => IconName::Star,
-        Some("user") => IconName::User,
-        _ => IconName::Folder,
     }
 }

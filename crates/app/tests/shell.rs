@@ -1,79 +1,15 @@
 //! UI integration tests for the app shell: the Space toggle, the left nav and
 //! the nav following changes made on disk.
 
+mod common;
+
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use gpui_kit::test::{ElementSnapshot, TestEventExt, TestQueryExt, TestWindowExt};
-use gpui_kit::{
-    AnyWindowHandle, AppContext, Bounds, Entity, MouseButton, TestAppContext, Window, WindowBounds,
-    WindowOptions, px, size,
-};
-use sett::{Shell, Workspace};
+use common::{Fixture, center_title, click_label, find_label, open_shell};
+use gpui_kit::test::{TestQueryExt, TestWindowExt};
+use gpui_kit::{AppContext as _, TestAppContext, Window};
 use sett_store::{Change, Settings, Space};
-
-struct Fixture {
-    _dir: tempfile::TempDir,
-    settings_path: PathBuf,
-    data_root: PathBuf,
-    window: AnyWindowHandle,
-    shell: Entity<Shell>,
-}
-
-fn open_shell(cx: &mut TestAppContext) -> Fixture {
-    let dir = tempfile::tempdir().unwrap();
-    let settings_path = dir.path().join("settings.toml");
-    let settings = Settings::defaults(dir.path());
-    let data_root = settings.data_root.clone();
-    cx.update(|cx| {
-        gpui_kit::init(cx);
-        sett::init(cx);
-    });
-    let (window, shell) = cx.update(|cx| {
-        let workspace =
-            Workspace::open_unwatched(settings, Some(settings_path.clone()), cx).unwrap();
-        gpui_kit::open_window(
-            WindowOptions {
-                window_bounds: Some(WindowBounds::Windowed(Bounds::new(
-                    Default::default(),
-                    size(px(1024.), px(720.)),
-                ))),
-                ..Default::default()
-            },
-            cx,
-            |window, cx| cx.new(|cx| Shell::new(workspace, window, cx)),
-        )
-        .unwrap()
-    });
-    Fixture {
-        _dir: dir,
-        settings_path,
-        data_root,
-        window,
-        shell,
-    }
-}
-
-/// Clicks the element with this accessible label, inside `scope` if given.
-fn click_label(
-    window: &mut Window,
-    scope: Option<&'static str>,
-    label: &str,
-    cx: &mut gpui_kit::App,
-) {
-    let target = find_label(window, scope, label);
-    let center = target.bounds().center();
-    window.pointer_move(center, None, cx);
-    window.pointer_down(center, MouseButton::Left, cx);
-    window.pointer_up(center, MouseButton::Left, cx);
-}
-
-fn find_label(window: &mut Window, scope: Option<&'static str>, label: &str) -> ElementSnapshot {
-    match scope {
-        Some(scope) => window.within(scope).find_by_label(label),
-        None => window.find_by_label(label),
-    }
-}
 
 fn is_selected(window: &mut Window, scope: Option<&'static str>, label: &str) -> bool {
     find_label(window, scope, label).selected() == Some(true)
@@ -83,14 +19,6 @@ fn is_selected(window: &mut Window, scope: Option<&'static str>, label: &str) ->
 const JOURNAL: &str = "0-0";
 const NOTES: &str = "0-1";
 const WEBSITE: &str = "1-1";
-
-fn center_title(window: &mut Window) -> String {
-    window
-        .find("center-title")
-        .label()
-        .unwrap_or_default()
-        .to_string()
-}
 
 fn last_space(settings_path: &Path) -> Space {
     Settings::load(settings_path, Path::new("/nonexistent")).last_space

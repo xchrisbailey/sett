@@ -49,9 +49,10 @@ fn new_items_get_slugs_from_titles_and_clashes_are_numbered() {
         "Notes don't clash with Tasks"
     );
 
-    let project = store.create_project(Space::Work, "Inbox").unwrap();
+    let project = store.create_project(Space::Work, "Inbox", None).unwrap();
     assert_eq!(project.slug, "inbox-2");
     assert_eq!(project.columns, ["Todo", "Doing", "Done"]);
+    assert_eq!(project.icon.as_deref(), Some("folder"));
 }
 
 #[test]
