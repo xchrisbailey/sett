@@ -114,6 +114,15 @@ impl MarkdownSource {
         let mut wiki_links = wiki_link_spans(text).into_iter().peekable();
         let mut prev: Option<char> = None;
         let mut ix = 0;
+        // FORK: a `[!NOTE]` callout marker opening the text is written as
+        // is; escaped, other tools no longer see the callout.
+        if self.pieces.is_empty()
+            && let Some(len) = callout_marker_len(text)
+        {
+            escaped.push_str(&text[..len]);
+            prev = Some(']');
+            ix = len;
+        }
         while ix < text.len() {
             // A bare URL is written as is: the GFM autolink literal it parses
             // back to is the same text, and escapes would be pasted into it.
@@ -445,6 +454,17 @@ fn entity_like(rest: &str) -> bool {
     };
     let len = body.chars().take_while(digit).count();
     len > 0 && body[len..].starts_with(';')
+}
+
+/// FORK: the length of a `[!TYPE]` callout marker at the start of `text`, if
+/// it can be written bare: nothing after it turns the brackets into a link.
+fn callout_marker_len(text: &str) -> Option<usize> {
+    let kind = text.strip_prefix("[!")?;
+    let kind_len = kind
+        .find(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '-')))
+        .filter(|len| *len > 0)?;
+    let rest = kind[kind_len..].strip_prefix(']')?;
+    (!rest.starts_with(['(', '[', ':'])).then_some(2 + kind_len + 1)
 }
 
 /// FORK: `[[target]]`, `[[target|label]]` and `[[target#heading]]` spans in

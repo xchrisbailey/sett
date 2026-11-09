@@ -107,8 +107,22 @@ fn list_markers_are_kept() {
 }
 
 #[test]
+fn callout_markers_stay_verbatim() {
+    for source in [
+        "> [!NOTE]\n> This is a GitHub-style callout.\n",
+        "> [!warning]- Folded\n> body\n",
+    ] {
+        assert_round_trips(source);
+    }
+}
+
+#[test]
 fn literal_brackets_that_are_not_wiki_links_stay_escaped() {
-    for source in ["\\[\\[not a link\\]\\](notes.md)\n", "\\[\\[a\\*b\\]\\]\n"] {
+    for source in [
+        "Mid-text \\[!NOTE\\] is not a callout.\n",
+        "\\[\\[not a link\\]\\](notes.md)\n",
+        "\\[\\[a\\*b\\]\\]\n",
+    ] {
         assert_round_trips(source);
     }
 }
