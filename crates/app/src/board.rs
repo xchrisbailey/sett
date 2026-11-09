@@ -331,11 +331,14 @@ impl BoardView {
         });
     }
 
+    /// A `locked` Board belongs to a Project whose frontmatter can't be read:
+    /// it shows its Tasks but takes no new Tasks, Column edits or drops.
     fn render_column(
         &self,
         board: &Board,
         ix: usize,
         column: &BoardColumn,
+        locked: bool,
         today: Date,
         cx: &Context<Self>,
     ) -> impl IntoElement + use<> {
@@ -357,7 +360,7 @@ impl BoardView {
             .children(
                 shown
                     .iter()
-                    .map(|task| self.render_card(task, &name, today, cx)),
+                    .map(|task| self.render_card(task, &name, locked, today, cx)),
             )
             .when(has_older, |cards| {
                 let label = if self.show_all_done {
@@ -387,18 +390,23 @@ impl BoardView {
             .gap_2()
             .rounded(cx.theme().radius_lg)
             .bg(cx.theme().muted)
-            .drag_over::<DraggedCard>(|style, _, _, cx| style.bg(cx.theme().accent))
-            .on_drop(cx.listener(move |this, card: &DraggedCard, window, cx| {
-                this.move_card(&card.slug, &drop_name, None, window, cx);
-            }))
-            .child(self.render_column_header(board, ix, column, cx))
-            .when_some(self.quick_adds.get(&name), |col, quick_add| {
-                col.child(
-                    div()
-                        .px_2()
-                        .child(Input::new(&quick_add.input).id("quick-add").small()),
-                )
+            .when(!locked, |col| {
+                col.drag_over::<DraggedCard>(|style, _, _, cx| style.bg(cx.theme().accent))
+                    .on_drop(cx.listener(move |this, card: &DraggedCard, window, cx| {
+                        this.move_card(&card.slug, &drop_name, None, window, cx);
+                    }))
             })
+            .child(self.render_column_header(board, ix, column, locked, cx))
+            .when_some(
+                self.quick_adds.get(&name).filter(|_| !locked),
+                |col, quick_add| {
+                    col.child(
+                        div()
+                            .px_2()
+                            .child(Input::new(&quick_add.input).id("quick-add").small()),
+                    )
+                },
+            )
             .child(cards)
     }
 
@@ -407,6 +415,7 @@ impl BoardView {
         board: &Board,
         ix: usize,
         column: &BoardColumn,
+        locked: bool,
         cx: &Context<Self>,
     ) -> impl IntoElement + use<> {
         let name = column.name().to_string();
@@ -454,7 +463,7 @@ impl BoardView {
                     .child(column.tasks().len().to_string()),
             )
             .child(div().flex_1())
-            .child(menu)
+            .when(!locked, |header| header.child(menu))
     }
 
     fn column_action(
@@ -489,9 +498,13 @@ impl BoardView {
         &self,
         task: &Task,
         column: &str,
+        locked: bool,
         today: Date,
         cx: &Context<Self>,
     ) -> impl IntoElement + use<> {
+        // A Task whose frontmatter can't be read can't be moved, since moving
+        // writes its file.
+        let draggable = !locked && !task.frontmatter_error();
         let slug = task.slug.clone();
         let title = SharedString::from(task.title.clone());
         let selected = self.selected_task.as_deref() == Some(slug.as_str());
@@ -544,24 +557,30 @@ impl BoardView {
             .focus_visible(move |style| style.border_color(ring))
             .on_action(cx.listener(move |this, _: &OpenCard, _, cx| this.open_task(&key_slug, cx)))
             .on_click(cx.listener(move |this, _, _, cx| this.open_task(&click_slug, cx)))
-            .on_drag(
-                DraggedCard {
-                    slug,
-                    title: title.clone(),
-                },
-                |card, _, _, cx| {
-                    let title = card.title.clone();
-                    cx.new(|_| CardPreview { title })
-                },
-            )
-            .drag_over::<DraggedCard>(|style, _, _, cx| {
-                style.border_t_2().border_color(cx.theme().drag_border)
+            .when(draggable, |card| {
+                card.on_drag(
+                    DraggedCard {
+                        slug,
+                        title: title.clone(),
+                    },
+                    |card, _, _, cx| {
+                        let title = card.title.clone();
+                        cx.new(|_| CardPreview { title })
+                    },
+                )
             })
-            .on_drop(cx.listener(move |this, card: &DraggedCard, window, cx| {
-                // The Column under the Card handles drops too; this one wins.
-                cx.stop_propagation();
-                this.move_card(&card.slug, &drop_column, Some(&drop_before), window, cx);
-            }))
+            .when(!locked, |card| {
+                card.drag_over::<DraggedCard>(|style, _, _, cx| {
+                    style.border_t_2().border_color(cx.theme().drag_border)
+                })
+                .on_drop(cx.listener(
+                    move |this, card: &DraggedCard, window, cx| {
+                        // The Column under the Card handles drops too; this one wins.
+                        cx.stop_propagation();
+                        this.move_card(&card.slug, &drop_column, Some(&drop_before), window, cx);
+                    },
+                ))
+            })
             .child(div().text_sm().child(title))
             .when(has_meta, |card| {
                 card.child(
@@ -595,13 +614,14 @@ impl Render for BoardView {
         else {
             return div().into_any_element();
         };
+        let locked = project.frontmatter_error();
         let board = Board::new(&project.columns, model.index().tasks(&project.slug));
         let columns: Vec<AnyElement> = board
             .columns()
             .iter()
             .enumerate()
             .map(|(ix, column)| {
-                self.render_column(&board, ix, column, today, cx)
+                self.render_column(&board, ix, column, locked, today, cx)
                     .into_any_element()
             })
             .collect();
@@ -613,18 +633,20 @@ impl Render for BoardView {
             .gap_3()
             .p_4()
             .children(columns)
-            .child(
-                div().flex_shrink_0().child(
-                    Button::new("add-column")
-                        .ghost()
-                        .small()
-                        .icon(IconName::Plus)
-                        .label("Add column…")
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.open_column_dialog(None, window, cx);
-                        })),
-                ),
-            )
+            .when(!locked, |board| {
+                board.child(
+                    div().flex_shrink_0().child(
+                        Button::new("add-column")
+                            .ghost()
+                            .small()
+                            .icon(IconName::Plus)
+                            .label("Add column…")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.open_column_dialog(None, window, cx);
+                            })),
+                    ),
+                )
+            })
             .overflow_x_scrollbar()
             .into_any_element()
     }

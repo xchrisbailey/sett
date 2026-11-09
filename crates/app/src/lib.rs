@@ -9,6 +9,7 @@ mod item_editor;
 mod item_links;
 mod nav;
 mod notes;
+mod notice;
 mod project_dialog;
 mod shell;
 mod task_view;

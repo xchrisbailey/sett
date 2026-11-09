@@ -8,13 +8,14 @@ use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Entity, Focusable as _, InteractiveElement as _,
     IntoElement, MouseButton, ParentElement as _, Render, Role, ScrollHandle,
     StatefulInteractiveElement as _, Styled as _, Subscription, Task, TestSupportExt as _, Window,
-    div,
+    div, prelude::FluentBuilder as _,
 };
 use markdown_editor::{BlockEditor, BlockEditorEvent, BlockEditorState};
 use sett_store::{Date, EditorMode, JournalEntry, Note, Space};
 
 use crate::app_model::AppModel;
 use crate::item_links::ItemLinks;
+use crate::notice::frontmatter_notice;
 
 /// How long after the last keystroke an edit is written.
 const AUTOSAVE_DELAY: Duration = Duration::from_millis(500);
@@ -86,6 +87,14 @@ impl Version {
     /// frontmatter key isn't something the user needs to choose about.
     fn same_text(&self, other: &Version) -> bool {
         self.title() == other.title() && self.body() == other.body()
+    }
+
+    fn frontmatter_error(&self) -> bool {
+        match self {
+            Version::Note(note) => note.frontmatter_error(),
+            Version::Journal(entry) => entry.frontmatter_error(),
+            Version::Task(task) => task.frontmatter_error(),
+        }
     }
 }
 
@@ -186,6 +195,12 @@ impl ItemEditor {
         self.item.as_ref()
     }
 
+    /// Whether the open Item's frontmatter can't be read, so it shows read-only
+    /// and is never saved.
+    pub(crate) fn locked(&self) -> bool {
+        self.base.as_ref().is_some_and(Version::frontmatter_error)
+    }
+
     /// The title box, for a host that lays the title out itself.
     pub(crate) fn title_input(&self) -> &Entity<InputState> {
         &self.title
@@ -238,7 +253,7 @@ impl ItemEditor {
     }
 
     fn edited(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.item.is_none() {
+        if self.item.is_none() || self.locked() {
             return;
         }
         self.dirty = true;
@@ -386,6 +401,9 @@ impl ItemEditor {
         let title = base.title().unwrap_or_default().to_string();
         self.title
             .update(cx, |input, cx| input.set_value(title, window, cx));
+        let locked = base.frontmatter_error();
+        self.block
+            .update(cx, |block, cx| block.set_readonly(locked, cx));
         self.load_body(window, cx);
         self.seen = seen;
         self.base = Some(base);
@@ -506,7 +524,12 @@ impl ItemEditor {
                 .flex_col()
                 .px_6()
                 .py_2()
-                .child(Editor::new(&self.raw).appearance(false).size_full())
+                .child(
+                    Editor::new(&self.raw)
+                        .appearance(false)
+                        .readonly(self.locked())
+                        .size_full(),
+                )
                 .into_any_element(),
         }
     }
@@ -539,6 +562,7 @@ impl Render for ItemEditor {
             ItemRef::Note { .. } => div().px_6().pt_4().child(
                 Input::new(&self.title)
                     .id("note-title")
+                    .readonly(self.locked())
                     .appearance(false)
                     .large()
                     .text_xl()
@@ -556,6 +580,9 @@ impl Render for ItemEditor {
             .size_full()
             .min_h_0()
             .child(header)
+            .when(self.locked(), |editor| {
+                editor.child(div().px_6().pt_2().child(frontmatter_notice()))
+            })
             .child(self.render_body(cx))
             .child(ItemLinks::new(self.model.clone(), item.id()))
             .into_any_element()

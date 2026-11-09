@@ -4,7 +4,7 @@ use gpui_kit::component::{ActiveTheme as _, StyledExt as _, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, AppContext as _, Context, Div, Entity, InteractiveElement as _, IntoElement,
     ParentElement as _, Render, Role, SharedString, StatefulInteractiveElement as _, Styled as _,
-    Subscription, TestSupportExt as _, Window, div,
+    Subscription, TestSupportExt as _, Window, div, prelude::FluentBuilder as _,
 };
 
 use sett_store::{ItemId, Space};
@@ -13,6 +13,7 @@ use crate::app_model::{AppModel, Selection, today};
 use crate::board::{BoardEvent, BoardView};
 use crate::item_editor::{ItemEditor, ItemRef};
 use crate::notes::{NotesScope, NotesView};
+use crate::notice::frontmatter_notice;
 use crate::task_view::{TaskView, TaskViewEvent};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -200,7 +201,12 @@ impl CenterPanel {
             .child(text)
     }
 
-    fn render_project(&self, name: SharedString, cx: &mut Context<Self>) -> AnyElement {
+    fn render_project(
+        &self,
+        name: SharedString,
+        locked: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let tabs = TabBar::new("project-tabs")
             .underline()
             .selected_index(match self.project_tab {
@@ -232,6 +238,9 @@ impl CenterPanel {
         v_flex()
             .size_full()
             .child(header)
+            .when(locked, |page| {
+                page.child(div().px_4().pt_3().child(frontmatter_notice()))
+            })
             .child(div().flex_1().min_h_0().child(body))
             .into_any_element()
     }
@@ -258,7 +267,8 @@ impl Render for CenterPanel {
             Selection::Project(slug) => match model.index().project(&slug) {
                 Some(project) => {
                     let name = SharedString::from(project.name.clone());
-                    self.render_project(name, cx)
+                    let locked = project.frontmatter_error();
+                    self.render_project(name, locked, cx)
                 }
                 None => self
                     .render_placeholder("This Project no longer exists.", cx)

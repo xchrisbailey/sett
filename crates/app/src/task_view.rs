@@ -7,7 +7,8 @@ use gpui_kit::component::input::Input;
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::select::{SearchableVec, Select, SelectEvent, SelectState};
 use gpui_kit::component::{
-    ActiveTheme as _, Sizable as _, StyledExt as _, WindowExt as _, h_flex, v_flex,
+    ActiveTheme as _, Disableable as _, Sizable as _, StyledExt as _, WindowExt as _, h_flex,
+    v_flex,
 };
 use gpui_kit::{
     App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable,
@@ -269,7 +270,8 @@ impl Render for TaskView {
         if self.task.is_none() {
             return div().into_any_element();
         }
-        let title = self.editor.read(cx).title_input().clone();
+        let editor = self.editor.read(cx);
+        let (title, locked) = (editor.title_input().clone(), editor.locked());
         v_flex()
             .id("task-view")
             .test_support()
@@ -286,6 +288,7 @@ impl Render for TaskView {
                     .child(
                         Input::new(&title)
                             .id("task-title")
+                            .readonly(locked)
                             .appearance(false)
                             .large()
                             .text_xl()
@@ -300,6 +303,7 @@ impl Render for TaskView {
                                 Select::new(&self.column)
                                     .id("task-column")
                                     .small()
+                                    .disabled(locked)
                                     .accessibility_label("Column"),
                                 cx,
                             ))
@@ -309,7 +313,8 @@ impl Render for TaskView {
                                     DatePicker::new(&self.due)
                                         .small()
                                         .placeholder("No due date")
-                                        .cleanable(true),
+                                        .cleanable(true)
+                                        .disabled(locked),
                                 ),
                                 cx,
                             )),
