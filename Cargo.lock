@@ -6454,6 +6454,7 @@ dependencies = [
 name = "sett"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "gpui-kit",
  "sett-store",
  "tempfile",

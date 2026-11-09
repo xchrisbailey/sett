@@ -1,11 +1,13 @@
 //! The sett desktop app: the window shell, the left nav and the center panel,
 //! built on `sett-store`.
 
+mod board;
 mod center;
 mod nav;
 mod shell;
 mod workspace;
 
+pub use board::BoardEvent;
 pub use shell::{Shell, ShowPersonal, ShowWork};
 pub use workspace::{Selection, Workspace};
 

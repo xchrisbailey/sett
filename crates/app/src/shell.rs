@@ -34,7 +34,7 @@ pub struct Shell {
 
 impl Shell {
     pub fn new(workspace: Entity<Workspace>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let center = cx.new(|cx| CenterPanel::new(workspace.clone(), cx));
+        let center = cx.new(|cx| CenterPanel::new(workspace.clone(), window, cx));
         let observe = cx.observe(&workspace, |_, _, cx| cx.notify());
         let focus_handle = cx.focus_handle();
         // The Space shortcuts live on the shell's key context, so it needs focus

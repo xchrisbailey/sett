@@ -3,7 +3,9 @@ use std::io;
 use std::path::PathBuf;
 
 use gpui_kit::{App, AppContext as _, Context, Entity, Task};
-use sett_store::{Change, INBOX_SLUG, Settings, Space, SpaceIndex, Store, Update, Watcher};
+use sett_store::{
+    Board, Change, Date, INBOX_SLUG, Project, Settings, Space, SpaceIndex, Store, Update, Watcher,
+};
 
 /// What the center panel shows for the active Space.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -130,6 +132,126 @@ impl Workspace {
         }
     }
 
+    /// Quick-adds a Task at the top of a Column of the Project's Board.
+    pub fn create_task(
+        &mut self,
+        project: &str,
+        column: &str,
+        title: &str,
+        cx: &mut Context<Self>,
+    ) -> io::Result<()> {
+        let task = self
+            .store
+            .create_task_in(self.space(), project, column, title, today())?;
+        self.reload(&[task_change(project, &task.slug)], cx);
+        Ok(())
+    }
+
+    /// Moves a Task on its Project's Board into `column`, before the Task
+    /// `before` or at the end. This is what dropping a Card does.
+    pub fn move_task(
+        &mut self,
+        project: &str,
+        slug: &str,
+        column: &str,
+        before: Option<&str>,
+        cx: &mut Context<Self>,
+    ) -> io::Result<()> {
+        let columns = self.project_columns(project)?;
+        let board = Board::new(&columns, self.index.tasks(project));
+        let written = self
+            .store
+            .move_task(&board, slug, column, before, today())?;
+        let changes: Vec<Change> = written
+            .iter()
+            .map(|t| task_change(project, &t.slug))
+            .collect();
+        self.reload(&changes, cx);
+        Ok(())
+    }
+
+    pub fn add_column(
+        &mut self,
+        project: &str,
+        name: &str,
+        cx: &mut Context<Self>,
+    ) -> io::Result<()> {
+        self.edit_columns(project, cx, |store, project, _| {
+            store.add_column(project, name)
+        })
+    }
+
+    pub fn rename_column(
+        &mut self,
+        project: &str,
+        from: &str,
+        to: &str,
+        cx: &mut Context<Self>,
+    ) -> io::Result<()> {
+        self.edit_columns(project, cx, |store, project, tasks| {
+            store.rename_column(project, tasks, from, to)
+        })
+    }
+
+    /// Moves the Column at `from` to position `to` (both zero-based).
+    pub fn move_column(
+        &mut self,
+        project: &str,
+        from: usize,
+        to: usize,
+        cx: &mut Context<Self>,
+    ) -> io::Result<()> {
+        self.edit_columns(project, cx, |store, project, tasks| {
+            store.move_column(project, tasks, from, to, today())
+        })
+    }
+
+    pub fn delete_column(
+        &mut self,
+        project: &str,
+        name: &str,
+        cx: &mut Context<Self>,
+    ) -> io::Result<()> {
+        self.edit_columns(project, cx, |store, project, tasks| {
+            store.delete_column(project, tasks, name, today())
+        })
+    }
+
+    fn project_columns(&self, project: &str) -> io::Result<Vec<String>> {
+        self.index
+            .project(project)
+            .map(|p| p.columns.clone())
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "project not found"))
+    }
+
+    /// Runs a Column edit, then reloads the whole Project, since an edit can
+    /// rewrite any of its Tasks.
+    fn edit_columns(
+        &mut self,
+        slug: &str,
+        cx: &mut Context<Self>,
+        edit: impl FnOnce(&Store, &mut Project, Vec<&sett_store::Task>) -> io::Result<()>,
+    ) -> io::Result<()> {
+        let mut project = self
+            .index
+            .project(slug)
+            .cloned()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "project not found"))?;
+        let result = edit(&self.store, &mut project, self.index.tasks(slug));
+        // Reload even on failure: an edit can fail after writing some files.
+        self.reload(&[Change::Project(slug.to_string())], cx);
+        result
+    }
+
+    /// sett's own writes never come back through the watcher, so the index
+    /// is brought up to date here instead.
+    fn reload(&mut self, changes: &[Change], cx: &mut Context<Self>) {
+        for change in changes {
+            self.index.apply(&self.store, change);
+        }
+        cx.notify();
+    }
+
     /// A selected Project that was deleted or renamed on disk falls back to
     /// the Inbox rather than leaving the center panel pointing at nothing.
     fn fix_selection(&mut self) {
@@ -149,6 +271,28 @@ impl Workspace {
             // the other Space.
             eprintln!("sett: couldn't save settings to {}: {err}", path.display());
         }
+    }
+}
+
+/// The local calendar date, which decides when a Task was done and whether
+/// it is overdue.
+pub(crate) fn today() -> Date {
+    use chrono::Datelike as _;
+    let now = chrono::Local::now().date_naive();
+    let date = || {
+        Date::new(
+            u16::try_from(now.year()).ok()?,
+            u8::try_from(now.month()).ok()?,
+            u8::try_from(now.day()).ok()?,
+        )
+    };
+    date().expect("the local date is a valid calendar date")
+}
+
+fn task_change(project: &str, slug: &str) -> Change {
+    Change::Task {
+        project: project.to_string(),
+        slug: slug.to_string(),
     }
 }
 

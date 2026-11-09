@@ -1,11 +1,12 @@
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{ActiveTheme as _, StyledExt as _, h_flex, v_flex};
 use gpui_kit::{
-    AnyElement, Context, Div, Entity, InteractiveElement as _, IntoElement, ParentElement as _,
-    Render, Role, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription,
-    TestSupportExt as _, Window, div,
+    AnyElement, AppContext as _, Context, Div, Entity, InteractiveElement as _, IntoElement,
+    ParentElement as _, Render, Role, SharedString, StatefulInteractiveElement as _, Styled as _,
+    Subscription, TestSupportExt as _, Window, div,
 };
 
+use crate::board::BoardView;
 use crate::workspace::{Selection, Workspace};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -15,19 +16,26 @@ enum ProjectTab {
     Notes,
 }
 
-/// Shows whatever the nav has selected. Journal, Notes, the Board and the
-/// Project's Notes are placeholders until their own views land.
+/// Shows whatever the nav has selected. Journal, Notes and the Project's
+/// Notes are placeholders until their own views land.
 pub(crate) struct CenterPanel {
     workspace: Entity<Workspace>,
+    board: Entity<BoardView>,
     project_tab: ProjectTab,
     _observe: Subscription,
 }
 
 impl CenterPanel {
-    pub(crate) fn new(workspace: Entity<Workspace>, cx: &mut Context<Self>) -> Self {
+    pub(crate) fn new(
+        workspace: Entity<Workspace>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let observe = cx.observe(&workspace, |_, _, cx| cx.notify());
+        let board = cx.new(|cx| BoardView::new(workspace.clone(), window, cx));
         CenterPanel {
             workspace,
+            board,
             project_tab: ProjectTab::default(),
             _observe: observe,
         }
@@ -83,10 +91,10 @@ impl CenterPanel {
             .child(Tab::new().label("Board"))
             .child(Tab::new().label("Notes"));
         let body = match self.project_tab {
-            ProjectTab::Board => self.render_placeholder("Tasks will show here.", cx),
-            ProjectTab::Notes => {
-                self.render_placeholder("This Project's Notes will show here.", cx)
-            }
+            ProjectTab::Board => self.board.clone().into_any_element(),
+            ProjectTab::Notes => self
+                .render_placeholder("This Project's Notes will show here.", cx)
+                .into_any_element(),
         };
         v_flex()
             .size_full()
