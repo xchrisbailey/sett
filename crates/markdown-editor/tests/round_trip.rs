@@ -37,4 +37,14 @@ fn wiki_links_stay_verbatim() {
         "See [[Release process]], [[Meeting notes|last week's notes]] and [[Inbox#Today]].\n",
     );
     assert_round_trips("- [ ] Review [[Spike: block editor]] results\n");
+    assert_round_trips("Linked [[snake_case note]] and [[R&D]].\n");
+    // Inside a table an unescaped `|` would split the cell.
+    assert_round_trips("| Note |\n| --- |\n| [[target\\|label]] |\n");
+}
+
+#[test]
+fn literal_brackets_that_are_not_wiki_links_stay_escaped() {
+    for source in ["\\[\\[not a link\\]\\](notes.md)\n", "\\[\\[a\\*b\\]\\]\n"] {
+        assert_round_trips(source);
+    }
 }

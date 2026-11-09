@@ -19,6 +19,7 @@ pub(crate) fn editor_source_options() -> MarkdownSourceOptions {
         highlight_as_html: true,
         hoist_whitespace: true,
         escape_literals: true,
+        table_cell: false,
     }
 }
 
@@ -122,7 +123,7 @@ fn block(doc: &EditorDocument, id: BlockId) -> String {
                     .iter()
                     .map(|cell| match doc.inline(*cell) {
                         // A soft line break in a cell is `<br>` (D13).
-                        Some(inline) => inline_markdown(inline)
+                        Some(inline) => table_cell_markdown(inline)
                             .replace("\\\n", "<br>")
                             .replace('\n', "<br>")
                             .trim()
@@ -249,7 +250,22 @@ fn list_item(doc: &EditorDocument, item: BlockId, marker: &str) -> String {
 // would read as block syntax are escaped.
 
 pub(crate) fn inline_markdown(inline: &InlineText) -> String {
-    let mut source = MarkdownSource::with_options(editor_source_options());
+    inline_markdown_with(inline, editor_source_options())
+}
+
+/// FORK: [`inline_markdown`] for a table cell, where `|` must stay escaped.
+pub(crate) fn table_cell_markdown(inline: &InlineText) -> String {
+    inline_markdown_with(
+        inline,
+        MarkdownSourceOptions {
+            table_cell: true,
+            ..editor_source_options()
+        },
+    )
+}
+
+fn inline_markdown_with(inline: &InlineText, options: MarkdownSourceOptions) -> String {
+    let mut source = MarkdownSource::with_options(options);
     for (range, marks, atom) in inline.pieces() {
         match atom {
             Some(InlineAtom::Custom(node)) => source.push_marked(&custom_markdown(node), marks),

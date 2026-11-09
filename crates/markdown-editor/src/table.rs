@@ -153,7 +153,7 @@ impl BlockEditorModel {
         let cells = self.selected_cells()?;
         let cell_text = |id: &BlockId| {
             let inline = self.doc.inline(*id).cloned().unwrap_or_default();
-            super::serialize::inline_markdown(&inline)
+            super::serialize::table_cell_markdown(&inline)
         };
         let mut out = String::new();
         for (r, row) in cells.iter().enumerate() {

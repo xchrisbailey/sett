@@ -61,6 +61,9 @@ pub(crate) struct MarkdownSourceOptions {
     /// Backslash-escape Markdown punctuation in text pushed with
     /// [`MarkdownSource::push_literal`], so literal `*` stays literal.
     pub(crate) escape_literals: bool,
+    /// FORK: the text is a table cell, where an unescaped `|` would split the
+    /// cell even inside a wiki-link.
+    pub(crate) table_cell: bool,
 }
 
 /// The highlight colour `<mark>` gets when it carries no colour of its own
@@ -108,6 +111,7 @@ impl MarkdownSource {
         }
         let mut escaped = String::with_capacity(text.len());
         let mut urls = url_spans(text).into_iter().peekable();
+        let mut wiki_links = wiki_link_spans(text).into_iter().peekable();
         let mut prev: Option<char> = None;
         let mut ix = 0;
         while ix < text.len() {
@@ -125,6 +129,19 @@ impl MarkdownSource {
                     prev = source.chars().last();
                 }
                 ix = url.range.end;
+                continue;
+            }
+            // FORK: `[[wiki-links]]` are written as is, so other tools still
+            // see the link after a save.
+            if let Some(link) = wiki_links.next_if(|link| link.start == ix) {
+                let link_text = &text[link.clone()];
+                if self.options.table_cell {
+                    escaped.push_str(&link_text.replace('|', "\\|"));
+                } else {
+                    escaped.push_str(link_text);
+                }
+                prev = Some(']');
+                ix = link.end;
                 continue;
             }
             let Some(ch) = text[ix..].chars().next() else {
@@ -428,6 +445,48 @@ fn entity_like(rest: &str) -> bool {
     };
     let len = body.chars().take_while(digit).count();
     len > 0 && body[len..].starts_with(';')
+}
+
+/// FORK: `[[target]]`, `[[target|label]]` and `[[target#heading]]` spans in
+/// literal text that can be written without escapes. Only spans whose inner
+/// text needs no escaping qualify (bar the `|` alias separator, which a table
+/// cell still escapes): written bare they parse back to the same literal
+/// text, as long as nothing after them turns the brackets into a link (`(`
+/// or `[`).
+fn wiki_link_spans(text: &str) -> Vec<std::ops::Range<usize>> {
+    let mut spans = Vec::new();
+    let mut from = 0;
+    while let Some(open) = text[from..].find("[[").map(|at| from + at) {
+        let inner_start = open + 2;
+        let Some(close) = text[inner_start..].find("]]").map(|at| inner_start + at) else {
+            break;
+        };
+        let inner = &text[inner_start..close];
+        let end = close + 2;
+        let followed_by_link = matches!(text[end..].chars().next(), Some('(' | '['));
+        let safe = !inner.trim().is_empty()
+            && !followed_by_link
+            && inner.char_indices().all(|(ix, ch)| {
+                let prev = inner[..ix].chars().next_back();
+                let next = inner[ix + ch.len_utf8()..].chars().next();
+                match ch {
+                    '_' => {
+                        prev.is_some_and(char::is_alphanumeric)
+                            && next.is_some_and(char::is_alphanumeric)
+                    }
+                    '&' => !entity_like(&inner[ix + 1..]),
+                    '\\' | '`' | '*' | '[' | ']' | '<' | '>' | '~' | '$' | '\n' | '\r' => false,
+                    _ => true,
+                }
+            });
+        if safe {
+            spans.push(open..end);
+            from = end;
+        } else {
+            from = open + 1;
+        }
+    }
+    spans
 }
 
 /// A URL found in literal text, and how to write it so that it parses back to
