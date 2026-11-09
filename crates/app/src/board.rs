@@ -5,7 +5,7 @@ use std::io;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::dialog::DialogFooter;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
-use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
+use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{
@@ -20,6 +20,7 @@ use gpui_kit::{
 use sett_store::{Board, BoardColumn, Date, Task};
 
 use crate::app_model::{AppModel, Selection, today};
+use crate::confirm_delete::{ITEM_CONSEQUENCE, confirm_delete};
 
 actions!(sett, [OpenCard]);
 
@@ -204,6 +205,29 @@ impl BoardView {
         if let Err(err) = result {
             show_error("Couldn't move the Task", err, window, cx);
         }
+    }
+
+    fn confirm_delete_task(
+        &self,
+        slug: &str,
+        title: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(project) = self.project.clone() else {
+            return;
+        };
+        let model = self.model.clone();
+        let slug = slug.to_string();
+        confirm_delete(title, ITEM_CONSEQUENCE, window, cx, move |window, cx| {
+            let result = model.update(cx, |m, cx| m.trash_task(&project, &slug, cx));
+            if let Err(err) = result {
+                window.push_notification(
+                    Notification::error(format!("Couldn't delete the Task: {err}")),
+                    cx,
+                );
+            }
+        });
     }
 
     /// Opens a Task of whichever Project is now selected, as following a
@@ -532,7 +556,9 @@ impl BoardView {
         });
         let has_meta = due.is_some() || checklist.is_some();
 
-        let (click_slug, key_slug) = (slug.clone(), slug.clone());
+        let (click_slug, key_slug, menu_slug) = (slug.clone(), slug.clone(), slug.clone());
+        let menu_title = task.title.clone();
+        let view = cx.entity().downgrade();
         let focus = self.card_focus.get(&slug).cloned();
         let ring = theme.ring;
         let (drop_column, drop_before) = (column.to_string(), slug.clone());
@@ -590,6 +616,17 @@ impl BoardView {
                         .text_color(theme.muted_foreground)
                         .children(due)
                         .children(checklist),
+                )
+            })
+            .context_menu(move |menu, _, _| {
+                let (view, slug, title) = (view.clone(), menu_slug.clone(), menu_title.clone());
+                menu.item(
+                    PopupMenuItem::new("Delete\u{2026}").on_click(move |_, window, cx| {
+                        view.update(cx, |this, cx| {
+                            this.confirm_delete_task(&slug, &title, window, cx)
+                        })
+                        .ok();
+                    }),
                 )
             })
     }

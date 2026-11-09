@@ -4,6 +4,7 @@
 mod app_model;
 mod board;
 mod center;
+mod confirm_delete;
 mod icons;
 mod item_editor;
 mod item_links;

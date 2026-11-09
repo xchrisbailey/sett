@@ -1,6 +1,8 @@
 //! UI integration tests for the Task view: opening it from a Card, going back
 //! to the Board, and editing the Task's Column and due date.
 
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -56,10 +58,12 @@ fn open_board(cx: &mut TestAppContext, tasks: &[(&str, &str, f64, &str)]) -> Fix
                 ..Default::default()
             },
             cx,
-            |window, cx| cx.new(|cx| Shell::new(model, window, cx)),
+            |window, cx| cx.new(|cx| Shell::new(model.clone(), window, cx)),
         )
         .unwrap()
     });
+    // Stands in for the macOS Trash, which these tests must not touch.
+    cx.update(|cx| model.update(cx, |m, _| m.set_trash(|path| fs::remove_file(path))));
     Fixture {
         _dir: dir,
         tasks_dir,
@@ -286,5 +290,66 @@ fn switching_space_closes_the_task(cx: &mut TestAppContext) {
     cx.update_window(f.window, |_, window, cx| window.press("cmd-2", cx))
         .unwrap();
     cx.run_until_parked();
+    assert!(showing_board(cx, &f));
+}
+
+fn click_label(cx: &mut TestAppContext, f: &Fixture, label: &str) {
+    cx.update_window(f.window, |_, window, cx| {
+        window.render_frame(cx);
+        common::click_label(window, None, label, cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+}
+
+#[gpui_kit::test]
+fn deleting_a_card_confirms_then_trashes_its_task(cx: &mut TestAppContext) {
+    let f = open_board(cx, &[("a", "Todo", 1.0, ""), ("b", "Todo", 2.0, "")]);
+    let right_click = |cx: &mut TestAppContext| {
+        cx.update_window(f.window, |_, window, cx| {
+            window.render_frame(cx);
+            window.right_click("card-a", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+    };
+
+    right_click(cx);
+    click_label(cx, &f, "Delete\u{2026}");
+    click_label(cx, &f, "Cancel");
+    assert!(task_path(&f, "a").exists());
+
+    right_click(cx);
+    click_label(cx, &f, "Delete\u{2026}");
+    click_label(cx, &f, "Delete");
+    assert!(!task_path(&f, "a").exists());
+    assert!(task_path(&f, "b").exists());
+    cx.update_window(f.window, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("card-a").is_none());
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn deleting_the_open_task_returns_to_the_board_without_saving_it(cx: &mut TestAppContext) {
+    let f = open_board(cx, &[("a", "Todo", 1.0, "")]);
+    open_task(cx, &f, "a");
+    // An unsaved edit mustn't bring the file back after it's deleted.
+    cx.update_window(f.window, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("note-body", cx);
+        window.input("more", cx);
+    })
+    .unwrap();
+
+    cx.update_window(f.window, |_, window, cx| window.click("delete-task", cx))
+        .unwrap();
+    cx.run_until_parked();
+    click_label(cx, &f, "Delete");
+    cx.executor().advance_clock(Duration::from_secs(2));
+    cx.run_until_parked();
+
+    assert!(!task_path(&f, "a").exists());
     assert!(showing_board(cx, &f));
 }

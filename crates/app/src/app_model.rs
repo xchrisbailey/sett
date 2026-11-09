@@ -375,6 +375,21 @@ impl AppModel {
         Ok(())
     }
 
+    /// Moves a Task of the active Space to the Trash.
+    pub fn trash_task(
+        &mut self,
+        project: &str,
+        slug: &str,
+        cx: &mut Context<Self>,
+    ) -> io::Result<()> {
+        let task = self.index.task(project, slug).cloned().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, format!("task {slug} not found"))
+        })?;
+        self.store.trash_task(&task)?;
+        self.apply_change(task_change(project, slug), cx);
+        Ok(())
+    }
+
     /// Sets or clears a Task's due date, writing only that Task's file.
     pub fn set_task_due(
         &mut self,

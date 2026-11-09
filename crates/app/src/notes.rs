@@ -1,7 +1,7 @@
 use std::cmp::Reverse;
 use std::io;
 
-use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
+use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::scroll::ScrollableElement as _;
@@ -16,6 +16,7 @@ use gpui_kit::{
 use sett_store::{ItemId, Note, Space};
 
 use crate::app_model::{AppModel, Selection};
+use crate::confirm_delete::{ITEM_CONSEQUENCE, confirm_delete};
 use crate::item_editor::{ItemEditor, ItemRef};
 
 /// Which Notes a list shows.
@@ -126,24 +127,9 @@ impl NotesView {
     fn confirm_delete(&self, slug: &str, title: &str, window: &mut Window, cx: &mut Context<Self>) {
         let this = cx.entity().downgrade();
         let slug = slug.to_string();
-        let heading = SharedString::from(format!("Delete \u{201c}{title}\u{201d}?"));
-        window.open_alert_dialog(cx, move |alert, _, _| {
-            let this = this.clone();
-            let slug = slug.clone();
-            alert
-                .confirm()
-                .title(heading.clone())
-                .description(
-                    "The file moves to the Trash. Links to it from other Items will stop working.",
-                )
-                .ok_text("Delete")
-                .ok_variant(ButtonVariant::Danger)
-                .cancel_text("Cancel")
-                .on_ok(move |_, window, cx| {
-                    this.update(cx, |this, cx| this.delete(&slug, window, cx))
-                        .ok();
-                    true
-                })
+        confirm_delete(title, ITEM_CONSEQUENCE, window, cx, move |window, cx| {
+            this.update(cx, |this, cx| this.delete(&slug, window, cx))
+                .ok();
         });
     }
 

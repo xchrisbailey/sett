@@ -1,7 +1,7 @@
 use std::cell::Cell;
 
 use gpui_kit::assets::IconName;
-use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
+use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::dialog::{DialogAction, DialogClose, DialogFooter};
 use gpui_kit::component::form::{field, v_form};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
@@ -15,6 +15,7 @@ use gpui_kit::{
 };
 
 use crate::app_model::AppModel;
+use crate::confirm_delete::confirm_delete;
 use crate::icons::{DEFAULT_ICON, PROJECT_ICONS, icon_name, project_icon};
 
 /// Opens the dialog that creates a Project in the active Space.
@@ -47,28 +48,19 @@ pub(crate) fn confirm_delete_project(
     else {
         return;
     };
-    let title = SharedString::from(format!("Delete \u{201c}{name}\u{201d}?"));
-    window.open_alert_dialog(cx, move |alert, _, _| {
-        let model = model.clone();
-        let slug = slug.clone();
-        alert
-            .confirm()
-            .title(title.clone())
-            .description(
-                "Its folder, with its Tasks and Notes, moves to the Trash. \
-                 Links to it from other Items will stop working.",
-            )
-            .ok_text("Delete")
-            .ok_variant(ButtonVariant::Danger)
-            .cancel_text("Cancel")
-            .on_ok(move |_, window, cx| {
-                let result = model.update(cx, |w, cx| w.trash_project(&slug, cx));
-                if let Err(err) = result {
-                    show_error("Couldn\u{2019}t delete the Project", err, window, cx);
-                }
-                true
-            })
-    });
+    confirm_delete(
+        &name,
+        "Its folder, with its Tasks and Notes, moves to the Trash. \
+         Links to it from other Items will stop working.",
+        window,
+        cx,
+        move |window, cx| {
+            let result = model.update(cx, |w, cx| w.trash_project(&slug, cx));
+            if let Err(err) = result {
+                show_error("Couldn\u{2019}t delete the Project", err, window, cx);
+            }
+        },
+    );
 }
 
 /// Archives or unarchives a Project, reporting a failed write.

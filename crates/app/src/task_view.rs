@@ -1,6 +1,7 @@
 use std::io;
 
 use chrono::Datelike as _;
+use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::calendar::Date as PickerDate;
 use gpui_kit::component::date_picker::{DatePicker, DatePickerEvent, DatePickerState};
 use gpui_kit::component::input::Input;
@@ -18,6 +19,7 @@ use gpui_kit::{
 use sett_store::{Board, Date, ItemId, Space};
 
 use crate::app_model::AppModel;
+use crate::confirm_delete::{ITEM_CONSEQUENCE, confirm_delete};
 use crate::item_editor::{ItemEditor, ItemRef};
 
 actions!(sett, [CloseTask]);
@@ -231,6 +233,30 @@ impl TaskView {
         }
     }
 
+    fn confirm_delete(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let title = self.title(cx);
+        let this = cx.entity().downgrade();
+        confirm_delete(&title, ITEM_CONSEQUENCE, window, cx, move |window, cx| {
+            this.update(cx, |this, cx| this.delete(window, cx)).ok();
+        });
+    }
+
+    /// Trashes the open Task and goes back to the Board. Pending edits are
+    /// dropped first, so saving them can't bring the file back.
+    fn delete(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((project, slug)) = self.task.clone() else {
+            return;
+        };
+        self.editor.update(cx, |editor, cx| editor.discard(cx));
+        let result = self
+            .model
+            .update(cx, |m, cx| m.trash_task(&project, &slug, cx));
+        match result {
+            Ok(()) => self.back(window, cx),
+            Err(err) => show_error("Couldn\u{2019}t delete the Task", err, window, cx),
+        }
+    }
+
     fn set_due(&mut self, due: Option<Date>, window: &mut Window, cx: &mut Context<Self>) {
         let Some((project, slug)) = self.task.clone() else {
             return;
@@ -330,7 +356,18 @@ impl Render for TaskView {
                                         .disabled(locked),
                                 ),
                                 cx,
-                            )),
+                            ))
+                            .child(
+                                h_flex().child(
+                                    Button::new("delete-task")
+                                        .ghost()
+                                        .small()
+                                        .label("Delete\u{2026}")
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.confirm_delete(window, cx)
+                                        })),
+                                ),
+                            ),
                     ),
             )
             .child(self.editor.clone())
