@@ -6,7 +6,7 @@
 # --data defaults to scripts/fixtures/sett. The copy lives in a temp HOME, so the
 # real ~/sett and settings are never touched. The app opens on the Space's Inbox
 # Board; to capture another screen, edit a copy of the fixtures.
-# SETT_SHOT_DELAY (seconds, default 5) waits for the Board to finish loading.
+# SETT_SHOT_DELAY (seconds, default 1) waits for the first frames to render.
 # Needs Screen Recording permission for the terminal (System Settings → Privacy &
 # Security); without it the capture comes back blank.
 set -euo pipefail
@@ -53,6 +53,6 @@ for _ in $(seq 1 60); do
 done
 [[ -n "$id" ]] || { echo "no sett window appeared within 30s" >&2; exit 1; }
 
-sleep "${SETT_SHOT_DELAY:-5}" # let the first frames render
+sleep "${SETT_SHOT_DELAY:-1}" # let the first frames render
 screencapture -x -o -l "$id" "$out"
 echo "$out"
