@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Fast checks only; clippy and tests run in CI. Enable once per clone:
+#   git config core.hooksPath .githooks
+set -euo pipefail
+
+# Rejects conflict markers and whitespace errors in what's being committed.
+git diff --cached --check
+
+if git diff --cached --name-only | grep -q '\.rs$'; then
+    cargo fmt --all --check
+fi
