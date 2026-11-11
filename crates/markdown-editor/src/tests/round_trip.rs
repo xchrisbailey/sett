@@ -710,3 +710,21 @@ fn nested_callout_marker_stays_a_plain_quote() {
     assert_eq!(inner.kind(), BlockKind::Blockquote { callout: None });
     assert_eq!(editor.source(), source);
 }
+
+#[test]
+fn callout_starting_with_an_empty_list_item_keeps_the_blank_line() {
+    // `> - ` straight after the marker line would read back as a setext
+    // underline, turning the callout into a heading in a plain quote.
+    for source in ["> [!NOTE]\n>\n> -", "> [!NOTE]\n>\n> 1."] {
+        let editor = model(source);
+        assert_eq!(callout_of(&editor, 0), Some(CalloutKind::Note), "{source}");
+        let saved = editor.source();
+        let reloaded = model(&saved);
+        assert_eq!(
+            callout_of(&reloaded, 0),
+            Some(CalloutKind::Note),
+            "{source} saved as {saved:?}"
+        );
+        assert_eq!(reloaded.source(), saved);
+    }
+}

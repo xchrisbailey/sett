@@ -228,7 +228,10 @@ fn quote_lines(text: &str) -> String {
 /// paragraph can; anything else (a rule would make the marker a setext
 /// heading) gets a blank line first, which reloads the same.
 fn follows_marker_line(doc: &EditorDocument, first: Option<&BlockId>) -> bool {
-    match first.and_then(|id| doc.kind(*id)) {
+    let Some(&first) = first else {
+        return false;
+    };
+    match doc.kind(first) {
         Some(
             BlockKindData::Paragraph
             | BlockKindData::Heading { .. }
@@ -236,9 +239,26 @@ fn follows_marker_line(doc: &EditorDocument, first: Option<&BlockId>) -> bool {
             | BlockKindData::Blockquote { .. },
         ) => true,
         // An ordered list interrupts a paragraph only when it starts at 1.
-        Some(BlockKindData::List { ordered, start, .. }) => !ordered || start.unwrap_or(1) == 1,
+        // FORK: a bare first item (`> - `) would read back as a setext
+        // underline under the marker line, so it keeps the blank `>` line.
+        Some(BlockKindData::List { ordered, start, .. }) => {
+            (!ordered || start.unwrap_or(1) == 1) && !first_item_is_bare(doc, first)
+        }
         _ => false,
     }
+}
+
+/// Whether `list`'s first item holds nothing but empty paragraphs, so it
+/// saves as a bare marker.
+fn first_item_is_bare(doc: &EditorDocument, list: BlockId) -> bool {
+    doc.children(list).first().is_some_and(|item| {
+        doc.children(*item).iter().all(|leaf| {
+            matches!(doc.kind(*leaf), Some(BlockKindData::Paragraph))
+                && doc
+                    .inline(*leaf)
+                    .is_some_and(|inline| inline.text().trim().is_empty())
+        })
+    })
 }
 
 /// FORK: whether a delimiter row kept from the source still describes
@@ -284,15 +304,7 @@ fn list_item(doc: &EditorDocument, item: BlockId, marker: &str) -> String {
             let is_list = matches!(doc.kind(*child), Some(BlockKindData::List { .. }));
             // A bare nested marker cannot interrupt a paragraph; without a
             // blank line it becomes literal body text on restore.
-            let bare_nested = is_list
-                && doc.children(*child).first().is_some_and(|item| {
-                    doc.children(*item).iter().all(|leaf| {
-                        matches!(doc.kind(*leaf), Some(BlockKindData::Paragraph))
-                            && doc
-                                .inline(*leaf)
-                                .is_some_and(|inline| inline.text().trim().is_empty())
-                    })
-                });
+            let bare_nested = is_list && first_item_is_bare(doc, *child);
             // Two paragraphs in a row need a blank line, or they merge.
             body.push_str(
                 if spread || bare_nested || (!is_list && !prev_is_list) || prev_is_list {
