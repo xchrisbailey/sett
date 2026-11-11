@@ -148,6 +148,19 @@ fn the_shortcut_outside_a_callout_does_nothing(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn the_shortcut_does_not_open_it_while_the_header_is_scrolled_away(cx: &mut TestAppContext) {
+    // The caret ends up on the last line, far below the header.
+    let body: String = (0..120).map(|n| format!(">\n> line {n}\n")).collect();
+    let (f, path) = open_note(cx, &format!("> [!NOTE]\n> first\n{body}"));
+    let before = fs::read(&path).unwrap();
+    press(cx, &f, SHORTCUT);
+    assert!(!menu_open(cx, &f));
+    cx.executor().advance_clock(AFTER_AUTOSAVE);
+    cx.run_until_parked();
+    assert_eq!(fs::read(&path).unwrap(), before);
+}
+
+#[gpui_kit::test]
 fn one_undo_restores_the_old_type_and_the_caret_stays(cx: &mut TestAppContext) {
     let (f, path) = open_note(cx, "> [!WARNING]\n> Careful\n");
     press(cx, &f, SHORTCUT);

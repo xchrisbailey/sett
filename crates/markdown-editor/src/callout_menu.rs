@@ -3,7 +3,7 @@
 //! under the header. Picking one retypes the callout as one undo step. The
 //! editor keeps focus and the caret never moves, on pick or on close.
 
-use gpui::{Context, Pixels, Point, point, px};
+use gpui::{Bounds, Context, Pixels, Point, point, px};
 
 use super::{
     id::BlockId, kind::BlockKindData, kind::CalloutKind, state::BlockEditorState,
@@ -76,7 +76,9 @@ impl BlockEditorState {
     }
 
     /// The shortcut: open the menu for the callout holding the caret.
-    /// Elsewhere the key passes on.
+    /// Elsewhere the key passes on. A header that wasn't drawn in view last
+    /// frame (scrolled away, or not laid out yet) opens nothing, since the
+    /// menu would hang from somewhere the user can't see.
     pub(crate) fn on_open_callout_menu(
         &mut self,
         _: &super::state::OpenCalloutMenu,
@@ -84,9 +86,30 @@ impl BlockEditorState {
         cx: &mut Context<Self>,
     ) {
         match self.model.caret_callout() {
-            Some(block) if !self.readonly => self.open_callout_menu(block, cx),
+            Some(block) if !self.readonly => {
+                if self.callout_header_in_view(block) {
+                    self.open_callout_menu(block, cx);
+                }
+            }
             _ => cx.propagate(),
         }
+    }
+
+    /// The callout `block`'s header bounds in the last painted frame.
+    fn callout_header_bounds(&self, block: BlockId) -> Option<Bounds<Pixels>> {
+        let frame = self.frame.borrow();
+        let (_, bounds) = frame.callout_headers.iter().find(|(id, _)| *id == block)?;
+        Some(*bounds)
+    }
+
+    /// Whether `block`'s header was drawn last frame inside the scrolled
+    /// viewport (anywhere, with no scroll container).
+    fn callout_header_in_view(&self, block: BlockId) -> bool {
+        self.callout_header_bounds(block).is_some_and(|header| {
+            self.scroll_handle
+                .as_ref()
+                .is_none_or(|scroll| scroll.bounds().intersects(&header))
+        })
     }
 
     pub(crate) fn close_callout_menu(&mut self, cx: &mut Context<Self>) {
@@ -134,12 +157,7 @@ impl BlockEditorState {
     /// Where the open menu hangs from: under its callout's header, in
     /// window coordinates, from the last painted frame.
     pub(crate) fn callout_menu_anchor(&self) -> Option<Point<Pixels>> {
-        let menu = self.callout_menu.as_ref()?;
-        let frame = self.frame.borrow();
-        let (_, bounds) = frame
-            .callout_headers
-            .iter()
-            .find(|(id, _)| *id == menu.block)?;
+        let bounds = self.callout_header_bounds(self.callout_menu.as_ref()?.block)?;
         Some(point(bounds.left(), bounds.bottom() + px(4.)))
     }
 }
