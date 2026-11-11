@@ -262,12 +262,14 @@ impl RenderOnce for BlockEditor {
                 let element = match (&unit.items, node) {
                     (None, BlockNode::Blockquote { children, .. }) if let Some(kind) = callout => {
                         super::callout::render(
-                            kind,
-                            unit.id,
-                            children,
-                            is_last_node,
-                            &node_cx,
-                            &callout_headers,
+                            super::callout::CalloutBox {
+                                kind,
+                                id: unit.id,
+                                children,
+                                is_last: is_last_node,
+                                node_cx: &node_cx,
+                                headers: &callout_headers,
+                            },
                             window,
                             cx,
                         )

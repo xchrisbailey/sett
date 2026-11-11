@@ -43,7 +43,9 @@
 // Resolve existing GPUI paths and macro expansions through the Kit facade.
 extern crate gpui_kit as gpui;
 
+// FORK: drawing callouts, and the colour maths for their header text.
 mod callout;
+mod color;
 // FORK: the Callout type menu.
 mod callout_menu;
 mod command;
