@@ -2773,6 +2773,8 @@ fn command_name(command: &EditorCommand) -> &'static str {
         EditorCommand::ToggleList { .. } => "toggle_list",
         EditorCommand::ToggleTask => "toggle_task",
         EditorCommand::ToggleBlockquote => "toggle_blockquote",
+        EditorCommand::SetCallout(_) => "set_callout",
+        EditorCommand::InsertCallout(_) => "insert_callout",
         EditorCommand::SetTaskChecked(_) => "set_task_checked",
         EditorCommand::Indent => "indent",
         EditorCommand::Outdent => "outdent",

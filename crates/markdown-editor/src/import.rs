@@ -8,8 +8,8 @@ use gpui::SharedString;
 use super::{
     document::{AtomData, BlockContent, EditorDocument},
     inline::{InlineAtom, InlineText},
-    kind::{BlockKindData, default_list_marker},
-    step::DetachedBlock,
+    kind::{BlockKindData, Callout, default_list_marker},
+    step::{DetachedBlock, DetachedContent},
     transaction::TransactionBuilder,
 };
 use gpui_kit::base::text::{
@@ -31,6 +31,10 @@ pub(crate) fn parse_document(
     let mut blocks = Vec::new();
     for node in parsed.iter() {
         import_block(node, source, &defs, &mut blocks);
+        // FORK: only a top-level quote can be a Callout.
+        if let (BlockNode::Blockquote { span, .. }, Some(block)) = (node, blocks.last_mut()) {
+            detect_callout(source, *span, block);
+        }
     }
     for (ix, block) in blocks.into_iter().enumerate() {
         doc.attach(root, ix, block);
@@ -151,7 +155,7 @@ pub(crate) fn import_block(
             BlockContent::Inline(import_inline(children, defs)),
         ),
         BlockNode::Blockquote { children, .. } => DetachedBlock::container(
-            BlockKindData::Blockquote,
+            BlockKindData::Blockquote { callout: None },
             import_children(children, source, defs),
         ),
         BlockNode::List {
@@ -249,6 +253,71 @@ pub(crate) fn import_block(
         BlockNode::Unknown | _ => leaf(BlockKindData::Unknown, BlockContent::Atom(AtomData::None)),
     };
     out.push(block);
+}
+
+/// FORK: make the quote `block`, parsed from `span`, a Callout when its
+/// first line is just a `[!TYPE]` marker. The marker and the line break after
+/// it leave the text; a marker on a paragraph of its own (`> [!NOTE]\n>\n>
+/// Body`) leaves no empty paragraph behind, unless it is all there is.
+///
+/// The line is read from the source, so an escaped `\[!NOTE]` or text after
+/// the marker keeps the quote plain. gpui-kit's `block_surface` would detect
+/// this too, but its `Surface` nodes import as `Unknown` and save as nothing.
+fn detect_callout(source: &str, span: Option<Span>, block: &mut DetachedBlock) {
+    let Some(line) = span
+        .and_then(|span| source.get(span.start..))
+        .and_then(|rest| rest.lines().next())
+    else {
+        return;
+    };
+    let line = line.trim_start_matches([' ', '\t']);
+    let line = line.strip_prefix('>').unwrap_or(line);
+    let line = line.trim_matches([' ', '\t']);
+    let Some(marker) = line
+        .strip_prefix("[!")
+        .and_then(|rest| rest.strip_suffix(']'))
+    else {
+        return;
+    };
+    let Some(kind) = crate::kind::CalloutKind::from_marker(marker) else {
+        return;
+    };
+    let DetachedContent::Children(children) = &mut block.content else {
+        return;
+    };
+    let Some(DetachedBlock {
+        kind: BlockKindData::Paragraph,
+        content: DetachedContent::Leaf(BlockContent::Inline(inline)),
+        ..
+    }) = children.first_mut()
+    else {
+        return;
+    };
+    let written = format!("[!{marker}]");
+    if !inline.text().starts_with(&written) {
+        return;
+    }
+    let mut end = written.len();
+    if end < inline.len() {
+        let soft_break = inline.pieces().any(|(range, _, atom)| {
+            range.start == end
+                && matches!(atom, Some(InlineAtom::Custom(node)) if node.name() == SOFT_BREAK)
+        });
+        if !soft_break {
+            return;
+        }
+        end += crate::inline::ATOM_LEN;
+    }
+    inline.replace(0..end, InlineText::new());
+    if inline.is_empty() && children.len() > 1 {
+        children.remove(0);
+    }
+    block.kind = BlockKindData::Blockquote {
+        callout: Some(Callout {
+            kind,
+            marker: marker.to_string().into(),
+        }),
+    };
 }
 
 /// FORK: the second line of the table at `span`, as written. Inside a

@@ -151,7 +151,7 @@ impl NodeCache {
                 children: inline(),
                 span: None,
             },
-            BlockKindData::Blockquote => BlockNode::Blockquote {
+            BlockKindData::Blockquote { .. } => BlockNode::Blockquote {
                 children: children(self),
                 span: None,
             },

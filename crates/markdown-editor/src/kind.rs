@@ -10,7 +10,10 @@ use gpui_kit::base::text::editor_host::ColumnAlign;
 pub enum BlockKind {
     // containers
     Root,
-    Blockquote,
+    /// FORK: `callout` is set when the quote is a Callout (`> [!NOTE]`).
+    Blockquote {
+        callout: Option<CalloutKind>,
+    },
     List {
         ordered: bool,
     },
@@ -41,7 +44,10 @@ pub enum BlockKind {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum BlockKindData {
     Root,
-    Blockquote,
+    /// FORK: a quote that opens with `[!NOTE]` and the like is a Callout.
+    Blockquote {
+        callout: Option<Callout>,
+    },
     List {
         ordered: bool,
         start: Option<u32>,
@@ -83,6 +89,62 @@ pub(crate) enum BlockKindData {
     Unknown,
 }
 
+/// FORK: the type of a Callout, from its `[!TYPE]` marker.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum CalloutKind {
+    Note,
+    Tip,
+    Important,
+    Warning,
+    Caution,
+}
+
+impl CalloutKind {
+    pub const ALL: [Self; 5] = [
+        Self::Note,
+        Self::Tip,
+        Self::Important,
+        Self::Warning,
+        Self::Caution,
+    ];
+
+    /// The marker a new or retyped callout is written with (`NOTE`).
+    pub fn marker(self) -> &'static str {
+        match self {
+            Self::Note => "NOTE",
+            Self::Tip => "TIP",
+            Self::Important => "IMPORTANT",
+            Self::Warning => "WARNING",
+            Self::Caution => "CAUTION",
+        }
+    }
+
+    /// The type a marker names, in any case (`note`, `Note`, `NOTE`).
+    pub fn from_marker(marker: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|kind| kind.marker().eq_ignore_ascii_case(marker))
+    }
+}
+
+/// FORK: a Callout's type and its marker exactly as written, so a
+/// lowercase `[!note]` saves as it was loaded.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Callout {
+    pub kind: CalloutKind,
+    pub marker: SharedString,
+}
+
+impl Callout {
+    /// A callout as the editor writes it: an uppercase marker.
+    pub fn new(kind: CalloutKind) -> Self {
+        Self {
+            kind,
+            marker: kind.marker().into(),
+        }
+    }
+}
+
 /// FORK: the marker a list gets when the source doesn't say otherwise.
 pub(crate) fn default_list_marker(ordered: bool) -> char {
     if ordered { '.' } else { '-' }
@@ -92,7 +154,9 @@ impl BlockKindData {
     pub(crate) fn public(&self) -> BlockKind {
         match self {
             Self::Root => BlockKind::Root,
-            Self::Blockquote => BlockKind::Blockquote,
+            Self::Blockquote { callout } => BlockKind::Blockquote {
+                callout: callout.as_ref().map(|callout| callout.kind),
+            },
             Self::List { ordered, .. } => BlockKind::List { ordered: *ordered },
             Self::ListItem { checked, .. } => BlockKind::ListItem { checked: *checked },
             Self::Table { .. } => BlockKind::Table,
@@ -114,7 +178,7 @@ impl BlockKindData {
         matches!(
             self,
             Self::Root
-                | Self::Blockquote
+                | Self::Blockquote { .. }
                 | Self::List { .. }
                 | Self::ListItem { .. }
                 | Self::Table { .. }

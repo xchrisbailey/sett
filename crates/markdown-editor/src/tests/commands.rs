@@ -860,3 +860,96 @@ fn indent_feasibility_matches_the_commands() {
     caret_in(&mut m, 3, 0); // a paragraph
     assert!(!m.can_indent() && !m.can_outdent());
 }
+
+// FORK: callouts.
+
+#[test]
+fn set_callout_changes_type_and_clears_it_in_one_undo_step_each() {
+    let mut m = model("> [!note]\n> Body");
+    caret_in(&mut m, 0, 2);
+    assert!(
+        m.run(EditorCommand::SetCallout(Some(CalloutKind::Warning)))
+            .unwrap()
+    );
+    // A changed type is written in uppercase.
+    assert_eq!(m.source(), "> [!WARNING]\n> Body");
+    assert!(m.undo());
+    assert_eq!(m.source(), "> [!note]\n> Body");
+
+    assert!(m.run(EditorCommand::SetCallout(None)).unwrap());
+    assert_eq!(m.source(), "> Body");
+    assert!(m.undo());
+    assert_eq!(m.source(), "> [!note]\n> Body");
+}
+
+#[test]
+fn set_callout_targets_the_top_level_quote() {
+    let mut m = model("> Intro\n>\n> > Inner");
+    caret_in(&mut m, 1, 0);
+    assert!(
+        m.run(EditorCommand::SetCallout(Some(CalloutKind::Tip)))
+            .unwrap()
+    );
+    assert_eq!(m.source(), "> [!TIP]\n> Intro\n>\n> > Inner");
+}
+
+#[test]
+fn insert_callout_turns_an_empty_paragraph_into_an_empty_callout() {
+    let mut m = model("a\n\n");
+    caret_in(&mut m, 1, 0);
+    assert_eq!(m.document().leaves().nth(1).unwrap().text(), Some(""));
+    assert!(
+        m.run(EditorCommand::InsertCallout(CalloutKind::Warning))
+            .unwrap()
+    );
+    assert_eq!(m.source(), "a\n\n> [!WARNING]");
+    // The caret waits on the callout's empty line.
+    m.insert_text("Careful", EditOrigin::Typing).unwrap();
+    assert_eq!(m.source(), "a\n\n> [!WARNING]\n> Careful");
+    assert!(m.undo());
+    assert!(m.undo());
+    assert_eq!(m.source(), "a\n\n");
+}
+
+#[test]
+fn insert_callout_after_text_keeps_the_text() {
+    let mut m = model("a");
+    caret_at_end(&mut m, 0);
+    assert!(
+        m.run(EditorCommand::InsertCallout(CalloutKind::Tip))
+            .unwrap()
+    );
+    assert_eq!(m.source(), "a\n\n> [!TIP]");
+}
+
+#[test]
+fn toggle_blockquote_unwraps_a_callout_into_its_blocks() {
+    let mut m = model("> [!NOTE]\n> one\n>\n> two");
+    caret_in(&mut m, 1, 0);
+    assert!(m.run(EditorCommand::ToggleBlockquote).unwrap());
+    assert_eq!(m.source(), "one\n\ntwo");
+    assert!(m.undo());
+    assert_eq!(m.source(), "> [!NOTE]\n> one\n>\n> two");
+}
+
+#[test]
+fn enter_on_a_callouts_empty_first_line_keeps_the_rest_a_callout() {
+    let mut m = model("> [!TIP]\n> a");
+    caret_in(&mut m, 0, 0);
+    m.split_block().unwrap();
+    assert_eq!(m.source(), "> [!TIP]\n>\n> a");
+    caret_in(&mut m, 0, 0);
+    m.split_block().unwrap();
+    assert_eq!(m.source(), "\n\n> [!TIP]\n> a");
+}
+
+#[test]
+fn set_callout_outside_a_quote_is_refused() {
+    let mut m = model("text");
+    caret_in(&mut m, 0, 0);
+    assert!(
+        m.run(EditorCommand::SetCallout(Some(CalloutKind::Note)))
+            .is_err()
+    );
+    assert_eq!(m.source(), "text");
+}

@@ -59,17 +59,28 @@ fn block(doc: &EditorDocument, id: BlockId) -> String {
                 text.replace('\n', " ")
             )
         }
-        (BlockKindData::Blockquote, _) => join_blocks(doc, children)
-            .lines()
-            .map(|line| {
-                if line.is_empty() {
-                    ">".to_string()
-                } else {
-                    format!("> {line}")
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("\n"),
+        (BlockKindData::Blockquote { callout }, _) => {
+            let body = join_blocks(doc, children);
+            // FORK: a Callout writes its marker line, then its contents
+            // straight after it. An empty one is just the marker.
+            let Some(callout) = callout else {
+                return quote_lines(&body);
+            };
+            let marker = format!("[!{}]", callout.marker);
+            if body.trim_matches(['\n', '\r']).is_empty() {
+                return quote_lines(&marker);
+            }
+            // An empty first paragraph already starts the body with a
+            // blank line.
+            let separator = if body.starts_with('\n') {
+                ""
+            } else if follows_marker_line(doc, children.first()) {
+                "\n"
+            } else {
+                "\n\n"
+            };
+            quote_lines(&format!("{marker}{separator}{body}"))
+        }
         (
             BlockKindData::List {
                 ordered,
@@ -196,6 +207,37 @@ fn block(doc: &EditorDocument, id: BlockId) -> String {
         }
         // Documented lossiness: `Unknown` has no source to write back.
         _ => String::new(),
+    }
+}
+
+fn quote_lines(text: &str) -> String {
+    text.lines()
+        .map(|line| {
+            if line.is_empty() {
+                ">".to_string()
+            } else {
+                format!("> {line}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// FORK: whether `first` can start on the line after a Callout's marker.
+/// The marker line is a paragraph line, so only blocks that interrupt a
+/// paragraph can; anything else (a rule would make the marker a setext
+/// heading) gets a blank line first, which reloads the same.
+fn follows_marker_line(doc: &EditorDocument, first: Option<&BlockId>) -> bool {
+    match first.and_then(|id| doc.kind(*id)) {
+        Some(
+            BlockKindData::Paragraph
+            | BlockKindData::Heading { .. }
+            | BlockKindData::CodeBlock { .. }
+            | BlockKindData::Blockquote { .. },
+        ) => true,
+        // An ordered list interrupts a paragraph only when it starts at 1.
+        Some(BlockKindData::List { ordered, start, .. }) => !ordered || start.unwrap_or(1) == 1,
+        _ => false,
     }
 }
 
