@@ -189,6 +189,18 @@ fn callout_lists_the_five_callout_types(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn callouts_are_not_offered_inside_a_list_item(cx: &mut TestAppContext) {
+    let (f, path) = on_a_new_line(cx);
+    input(cx, &f, "- /");
+    assert!(menu_open(cx, &f));
+    assert!(has_label(cx, &f, "Heading 1"));
+    assert!(!has_label(cx, &f, "Note"));
+    input(cx, &f, "warn");
+    assert!(!menu_open(cx, &f));
+    assert_eq!(saved_body(cx, &path), "First line\n\n- /warn\n");
+}
+
+#[gpui_kit::test]
 fn picking_a_callout_leaves_the_caret_inside_it(cx: &mut TestAppContext) {
     let (f, path) = on_a_new_line(cx);
     input(cx, &f, "/warn");

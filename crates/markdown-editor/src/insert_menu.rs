@@ -166,13 +166,16 @@ impl BlockEditorState {
         text.get(1..caret.offset)
     }
 
-    /// The entries the current query matches, in menu order.
+    /// The entries the current query matches, in menu order. Callouts are
+    /// left out below the top level, where `InsertCallout` is refused.
     pub fn insert_menu_matches(&self) -> Vec<&InsertMenuItem> {
         let Some(query) = self.insert_menu_query() else {
             return Vec::new();
         };
+        let callouts = self.model.can_insert_callout();
         self.insert_menu_items
             .iter()
+            .filter(|item| callouts || !matches!(item.command(), EditorCommand::InsertCallout(_)))
             .filter(|item| item.matches(query))
             .collect()
     }

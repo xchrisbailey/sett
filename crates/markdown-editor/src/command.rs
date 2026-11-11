@@ -1726,13 +1726,25 @@ impl BlockEditorModel {
         })
     }
 
-    /// FORK: like `insert_table`, for an empty Callout.
+    /// FORK: whether `InsertCallout` applies: the caret's block must be top
+    /// level, since a nested quote draws as a plain quote and never loads as
+    /// a Callout. The Insert Menu hides its callout options otherwise.
+    pub(crate) fn can_insert_callout(&self) -> bool {
+        self.caret().is_some_and(|pos| {
+            self.doc
+                .index_in_parent(pos.block)
+                .is_some_and(|(parent, _)| parent == self.doc.root)
+        })
+    }
+
+    /// FORK: like `insert_table`, for an empty Callout, after a top-level
+    /// block only.
     fn insert_callout(&mut self, kind: CalloutKind) -> Result<bool, CommandError> {
         let pos = self
             .caret()
             .ok_or(CommandError::Unsupported("block selection"))?;
-        if self.current_cell().is_some() {
-            return Err(CommandError::Unsupported("callout in a table"));
+        if !self.can_insert_callout() {
+            return Err(CommandError::Unsupported("callout here"));
         }
         let line = DetachedBlock::paragraph(InlineText::new());
         let first = line.id;

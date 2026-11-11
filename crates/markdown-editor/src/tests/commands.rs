@@ -944,6 +944,26 @@ fn enter_on_a_callouts_empty_first_line_keeps_the_rest_a_callout() {
 }
 
 #[test]
+fn insert_callout_is_refused_below_the_top_level() {
+    // A quote that isn't top level draws as a plain quote, so a callout
+    // there would show as one and lose its type on reload.
+    for source in ["- item", "> quoted", "> [!NOTE]\n> inside"] {
+        let mut m = model(source);
+        caret_at_end(&mut m, 0);
+        assert!(!m.can_insert_callout(), "{source}");
+        assert!(
+            m.run(EditorCommand::InsertCallout(CalloutKind::Tip))
+                .is_err(),
+            "{source}"
+        );
+        assert_eq!(m.source(), source);
+    }
+    let mut m = model("text");
+    caret_at_end(&mut m, 0);
+    assert!(m.can_insert_callout());
+}
+
+#[test]
 fn set_callout_outside_a_quote_is_refused() {
     let mut m = model("text");
     caret_in(&mut m, 0, 0);
