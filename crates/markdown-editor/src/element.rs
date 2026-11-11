@@ -156,6 +156,7 @@ impl RenderOnce for BlockEditor {
             (state.cull.clone(), state.model.revision())
         };
         let mut children: Vec<AnyElement> = Vec::new();
+        // FORK: callout header bounds, filled at prepaint (`callout.rs`).
         let callout_headers = super::callout::HeaderSink::default();
         {
             let mut cull_state = cull.borrow_mut();
@@ -311,6 +312,7 @@ impl RenderOnce for BlockEditor {
                     _ => node.render(node_ix, flow.last(is_last_node), &node_cx, window, cx),
                 };
                 // Per-block accessibility node around the rendered block.
+                // FORK: a Callout is a `Note` landmark.
                 let role = match callout {
                     Some(_) => Some((Role::Note, None)),
                     None => block_role(node),
@@ -354,6 +356,7 @@ impl RenderOnce for BlockEditor {
             .when(window.is_a11y_active() || cfg!(test), |this| {
                 this.aria_value(self.state.read(cx).accessible_value())
             })
+            // FORK: `key_context` builds its string now (menu contexts).
             .key_context(self.state.read(cx).key_context().as_str())
             .track_focus(&focus)
             .cursor(if self.state.read(cx).grip_hover {
@@ -408,6 +411,7 @@ impl RenderOnce for BlockEditor {
             .on_action(window.listener_for(s, BlockEditorState::on_table_insert_row_below))
             .on_action(window.listener_for(s, BlockEditorState::on_table_delete_line))
             .on_action(window.listener_for(s, BlockEditorState::on_close_table_menu))
+            // FORK: the Insert Menu's and Callout type menu's actions.
             .on_action(window.listener_for(s, BlockEditorState::on_insert_menu_up))
             .on_action(window.listener_for(s, BlockEditorState::on_insert_menu_down))
             .on_action(window.listener_for(s, BlockEditorState::on_insert_menu_pick))
@@ -430,6 +434,7 @@ impl RenderOnce for BlockEditor {
             .on_action(window.listener_for(s, BlockEditorState::on_native_paste))
             .on_action(window.listener_for(s, BlockEditorState::on_paste_plain))
             .children(super::table_ui::render_menu(&self.state, cx))
+            // FORK: the Insert Menu and Callout type menu popovers.
             .children(super::insert_menu::render(&self.state, cx))
             .children(super::callout_menu::render(&self.state, cx))
             .child(EditorRoot {
@@ -453,6 +458,7 @@ impl RenderOnce for BlockEditor {
                         .into_any_element(),
                 ),
                 content_bounds,
+                // FORK
                 callout_headers,
                 padding: root_style.padding,
                 typography,
@@ -473,6 +479,7 @@ struct EditorRoot {
     snapshot: Rc<Snapshot>,
     style: BlockEditorStyle,
     content_bounds: Rc<Cell<Bounds<Pixels>>>,
+    /// FORK: where callout headers record their bounds this frame.
     callout_headers: super::callout::HeaderSink,
     padding: Edges<DefiniteLength>,
     typography: TextStyle,
@@ -569,6 +576,7 @@ impl Element for EditorRoot {
         cx: &mut App,
     ) -> Prepaint {
         if let Some(backgrounds) = self.backgrounds.take() {
+            // FORK: collect this frame's callout headers.
             self.callout_headers.borrow_mut().clear();
             let (_, geometries) = collect_leaf_geometry(backgrounds, || child.prepaint(window, cx));
             // Swap in the complete frame; handlers read it until the next one.
@@ -578,6 +586,7 @@ impl Element for EditorRoot {
                 &self.snapshot.tables,
             );
             frame.content = Some(self.content_bounds.get());
+            // FORK
             frame.callout_headers = self.callout_headers.take();
             {
                 let state = self.state.read(cx);

@@ -76,6 +76,7 @@ actions!(
         TableInsertRowBelow,
         TableDeleteLine,
         CloseTableMenu,
+        // FORK: the Insert Menu and the Callout type menu.
         InsertMenuUp,
         InsertMenuDown,
         InsertMenuPick,
@@ -423,6 +424,8 @@ pub struct BlockEditorState {
     pub(crate) dragging: bool,
     /// A press on a block handle, and the drag to reorder it (D22).
     pub(crate) block_drag: Option<BlockDrag>,
+    /// FORK: `pub(crate)` for the menus in `insert_menu.rs` and
+    /// `callout_menu.rs`.
     pub(crate) readonly: bool,
     image_policy: super::ImagePolicy,
     submit_policy: SubmitPolicy,
@@ -472,6 +475,7 @@ impl BlockEditorState {
                 this.blink_cursor.update(cx, |b, cx| b.stop(cx));
                 this.model.break_coalescing();
                 this.end_composition();
+                // FORK: blur closes the menus.
                 this.insert_menu = None;
                 this.callout_menu = None;
                 cx.emit(BlockEditorEvent::Blur);
@@ -512,6 +516,7 @@ impl BlockEditorState {
             hovered_link: None,
             pointer_hand: false,
             table_menu: None,
+            // FORK
             insert_menu: None,
             insert_menu_options: super::insert_menu::InsertMenuOption::defaults(),
             callout_menu: None,
@@ -530,6 +535,8 @@ impl BlockEditorState {
     pub fn set_submit_policy(&mut self, policy: SubmitPolicy) {
         self.submit_policy = policy;
     }
+    /// FORK: built as a string, so the `insert_menu` and `callout_menu`
+    /// contexts combine with the others; upstream matched on a fixed set.
     pub(crate) fn key_context(&self) -> String {
         let mut context = String::from(CONTEXT);
         if self.submit_policy == SubmitPolicy::Enter {
@@ -950,9 +957,11 @@ impl BlockEditorState {
 
     // ---- internal edit plumbing -------------------------------------------
 
+    /// FORK: `pub(crate)` for the menus' picks.
     pub(crate) fn after_edit(&mut self, origin: EditOrigin, cx: &mut Context<Self>) {
+        // FORK: refilter or close the Insert Menu. The type menu is for the
+        // document as it was when it opened, so it closes.
         self.sync_insert_menu();
-        // The type menu is for the document as it was when it opened.
         self.callout_menu = None;
         self.goal_x = None;
         self.reveal.set(true);
@@ -966,6 +975,8 @@ impl BlockEditorState {
     }
 
     fn selection_changed(&mut self, cx: &mut Context<Self>) {
+        // FORK: a caret move closes the type menu, and the Insert Menu once
+        // the caret leaves its paragraph.
         self.sync_insert_menu();
         self.callout_menu = None;
         self.reveal.set(true);
@@ -998,6 +1009,7 @@ impl BlockEditorState {
         }
     }
 
+    /// FORK: `pub(crate)` for the callout type menu.
     pub(crate) fn end_composition(&mut self) {
         self.marked = None;
         if std::mem::take(&mut self.composition_open) {
@@ -2856,6 +2868,7 @@ fn command_name(command: &EditorCommand) -> &'static str {
         EditorCommand::ToggleList { .. } => "toggle_list",
         EditorCommand::ToggleTask => "toggle_task",
         EditorCommand::ToggleBlockquote => "toggle_blockquote",
+        // FORK
         EditorCommand::SetCallout(_) => "set_callout",
         EditorCommand::InsertCallout(_) => "insert_callout",
         EditorCommand::SetTaskChecked(_) => "set_task_checked",
@@ -2962,6 +2975,7 @@ impl EntityInputHandler for BlockEditorState {
         };
         self.edit(origin, |m| m.insert_text(text, origin), cx);
         self.end_composition();
+        // FORK: a typed `/` may open the Insert Menu.
         if text == "/" && !composing {
             self.maybe_open_insert_menu(cx);
         } else if text == " " {

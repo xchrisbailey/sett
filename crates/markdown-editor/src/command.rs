@@ -886,7 +886,7 @@ impl BlockEditorModel {
             return Ok(false);
         };
         let count = doc.children(quote).len();
-        // The blocks after the caret stay the callout only when the caret
+        // FORK: the blocks after the caret stay the callout only when the caret
         // left from its first line; otherwise they continue as a plain quote.
         let tail_kind = match doc.kind(quote) {
             Some(kind) if index == 0 => kind.clone(),
@@ -1333,6 +1333,7 @@ impl BlockEditorModel {
             EditorCommand::Outdent => self.outdent(),
             EditorCommand::SetCodeBlock { lang } => self.set_code_block(lang),
             EditorCommand::ToggleBlockquote => self.toggle_blockquote(),
+            // FORK
             EditorCommand::SetCallout(kind) => self.set_callout(kind),
             EditorCommand::InsertCallout(kind) => self.insert_callout(kind),
             EditorCommand::MoveBlocks { down } => self.move_blocks(down),
