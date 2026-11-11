@@ -10,7 +10,7 @@ use super::{
     command::EditorCommand,
     editor::BlockEditorModel,
     id::BlockId,
-    kind::{BlockKind, BlockKindData},
+    kind::{BlockKind, BlockKindData, CalloutKind},
     position::BlockPosition,
     selection::BlockSelection,
     state::BlockEditorState,
@@ -81,7 +81,12 @@ impl InsertMenuItem {
             .aliases([format!("h{level}"), "title".into()])
             .hint(format!("{} ", "#".repeat(level as usize)))
         };
-        vec![
+        let callout = |kind: CalloutKind| {
+            Self::new(kind.label(), EditorCommand::InsertCallout(kind))
+                .aliases(["callout"])
+                .hint(format!("> [!{}]", kind.marker()))
+        };
+        let mut items = vec![
             heading(1),
             heading(2),
             heading(3),
@@ -97,6 +102,9 @@ impl InsertMenuItem {
             Self::new("Quote", EditorCommand::ToggleBlockquote)
                 .aliases(["blockquote"])
                 .hint("> "),
+        ];
+        items.extend(CalloutKind::ALL.map(callout));
+        items.extend([
             Self::new("Code block", EditorCommand::SetCodeBlock { lang: None })
                 .aliases(["fence", "snippet"])
                 .hint("```"),
@@ -107,7 +115,8 @@ impl InsertMenuItem {
             )
             .aliases(["rule", "separator", "hr", "line"])
             .hint("---"),
-        ]
+        ]);
+        items
     }
 }
 
@@ -396,7 +405,7 @@ mod tests {
 
     #[test]
     fn an_empty_query_lists_every_default() {
-        assert_eq!(labels("").len(), 10);
+        assert_eq!(labels("").len(), 15);
     }
 
     #[test]
@@ -409,6 +418,15 @@ mod tests {
             ["Bullet list", "Numbered list", "Checklist"]
         );
         assert!(labels("zzz").is_empty());
+    }
+
+    #[test]
+    fn callout_lists_the_five_callout_types() {
+        assert_eq!(
+            labels("callout"),
+            ["Note", "Tip", "Important", "Warning", "Caution"]
+        );
+        assert_eq!(labels("warn"), ["Warning"]);
     }
 
     /// Picking each default from `/query` in an empty paragraph saves the
@@ -424,6 +442,11 @@ mod tests {
             ("Checklist", "- [ ] "),
             // An empty quote saves as nothing, as it does after typing `> `.
             ("Quote", ""),
+            ("Note", "> [!NOTE]"),
+            ("Tip", "> [!TIP]"),
+            ("Important", "> [!IMPORTANT]"),
+            ("Warning", "> [!WARNING]"),
+            ("Caution", "> [!CAUTION]"),
             ("Code block", "```\n\n```"),
             ("Table", "|  |  |\n| --- | --- |\n|  |  |"),
             ("Divider", "---\n\n"),
@@ -443,8 +466,9 @@ mod tests {
             if label == "Quote" {
                 assert!(model.in_blockquote());
             }
-            if label == "Divider" {
-                // The caret is on the empty line under the rule.
+            if label == "Divider" || middle.starts_with("> [!") {
+                // The caret is on the empty line under the rule, or inside
+                // the callout.
                 let caret = model.caret().unwrap();
                 assert_eq!(model.doc().leaf_text(caret.block), Some(""));
             }

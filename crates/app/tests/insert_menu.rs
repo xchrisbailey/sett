@@ -177,3 +177,37 @@ fn one_undo_reverts_a_pick_to_the_typed_text(cx: &mut TestAppContext) {
     assert!(!menu_open(cx, &f));
     assert_eq!(saved_body(cx, &path), "First line\n\n/quo\n");
 }
+
+#[gpui_kit::test]
+fn callout_lists_the_five_callout_types(cx: &mut TestAppContext) {
+    let (f, _) = on_a_new_line(cx);
+    input(cx, &f, "/callout");
+    for label in ["Note", "Tip", "Important", "Warning", "Caution"] {
+        assert!(has_label(cx, &f, label), "{label}");
+    }
+    assert!(!has_label(cx, &f, "Quote"));
+}
+
+#[gpui_kit::test]
+fn picking_a_callout_leaves_the_caret_inside_it(cx: &mut TestAppContext) {
+    let (f, path) = on_a_new_line(cx);
+    input(cx, &f, "/warn");
+    press(cx, &f, "enter");
+    assert!(!menu_open(cx, &f));
+    assert!(has_label(cx, &f, "Warning callout"));
+    input(cx, &f, "Careful");
+    assert_eq!(
+        saved_body(cx, &path),
+        "First line\n\n> [!WARNING]\n> Careful\n"
+    );
+}
+
+#[gpui_kit::test]
+fn one_undo_reverts_a_callout_pick_to_the_typed_text(cx: &mut TestAppContext) {
+    let (f, path) = on_a_new_line(cx);
+    input(cx, &f, "/warn");
+    press(cx, &f, "enter");
+    press(cx, &f, "secondary-z");
+    assert!(!menu_open(cx, &f));
+    assert_eq!(saved_body(cx, &path), "First line\n\n/warn\n");
+}
