@@ -3,15 +3,19 @@
 //! under the header. Picking one retypes the callout as one undo step. The
 //! editor keeps focus and the caret never moves, on pick or on close.
 
-use gpui::{Bounds, Context, Pixels, Point, point, px};
+use gpui::{Bounds, Context, Pixels, Point};
 
 use super::{
-    id::BlockId, kind::BlockKindData, kind::CalloutKind, state::BlockEditorState,
+    id::BlockId,
+    kind::BlockKindData,
+    kind::CalloutKind,
+    menu::{self, MenuSlot, OpenMenu},
+    state::BlockEditorState,
     transaction::EditOrigin,
 };
 
-/// The menu's entries in order: the five types, then a plain quote.
-const ENTRIES: [Option<CalloutKind>; 6] = [
+/// The menu's options in order: the five types, then a plain quote.
+const CALLOUT_TYPES: [Option<CalloutKind>; 6] = [
     Some(CalloutKind::Note),
     Some(CalloutKind::Tip),
     Some(CalloutKind::Important),
@@ -19,13 +23,6 @@ const ENTRIES: [Option<CalloutKind>; 6] = [
     Some(CalloutKind::Caution),
     None,
 ];
-
-/// The open type menu: the callout it retypes and the highlighted entry.
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct CalloutMenu {
-    pub(crate) block: BlockId,
-    pub(crate) highlighted: usize,
-}
 
 impl BlockEditorState {
     /// Whether the Callout type menu is open.
@@ -52,10 +49,11 @@ impl BlockEditorState {
         self.end_composition();
         self.insert_menu = None;
         self.close_table_menu(cx);
-        self.callout_menu = Some(CalloutMenu {
-            block,
-            highlighted: ENTRIES.iter().position(|e| *e == Some(kind)).unwrap_or(0),
-        });
+        let highlighted = CALLOUT_TYPES
+            .iter()
+            .position(|option| *option == Some(kind))
+            .unwrap_or(0);
+        self.callout_menu = Some(OpenMenu::new(block, highlighted));
         cx.notify();
     }
 
@@ -110,30 +108,15 @@ impl BlockEditorState {
         })
     }
 
-    pub(crate) fn close_callout_menu(&mut self, cx: &mut Context<Self>) {
-        if self.callout_menu.take().is_some() {
-            cx.notify();
-        }
-    }
-
     /// Move the highlight down (`forward`) or up, wrapping at the ends.
     pub(crate) fn callout_menu_move(&mut self, forward: bool, cx: &mut Context<Self>) {
-        let Some(menu) = &mut self.callout_menu else {
-            return;
-        };
-        let count = ENTRIES.len();
-        menu.highlighted = if forward {
-            (menu.highlighted + 1) % count
-        } else {
-            (menu.highlighted + count - 1) % count
-        };
-        cx.notify();
+        self.step_menu(MenuSlot::Callout, forward, CALLOUT_TYPES.len(), cx);
     }
 
-    /// Pick entry `ix`: retype the callout (or make it a plain quote) as one
-    /// undo step, leaving the caret where it is.
+    /// Pick option `ix`: retype the callout (or make it a plain quote) as
+    /// one undo step, leaving the caret where it is.
     pub(crate) fn callout_menu_pick(&mut self, ix: usize, cx: &mut Context<Self>) {
-        let Some(&kind) = ENTRIES.get(ix) else {
+        let Some(&kind) = CALLOUT_TYPES.get(ix) else {
             return;
         };
         let Some(menu) = self.callout_menu.take() else {
@@ -143,11 +126,13 @@ impl BlockEditorState {
         if self.callout_kind(menu.block) == kind {
             return;
         }
-        let revision = self.model.revision();
         self.model.break_coalescing();
-        let _ = self.model.retype_quote(menu.block, kind);
+        let retyped = self.model.retype_quote(menu.block, kind);
         self.model.break_coalescing();
-        if self.model.revision() != revision {
+        // Any edit closes the menu, so `menu.block` is still the quote it
+        // opened on and this can't fail. If it ever did, the document is
+        // unchanged and there is nothing to report.
+        if retyped.unwrap_or(false) {
             self.after_edit(EditOrigin::Command("set_callout"), cx);
         }
     }
@@ -156,7 +141,7 @@ impl BlockEditorState {
     /// window coordinates, from the last painted frame.
     pub(crate) fn callout_menu_anchor(&self) -> Option<Point<Pixels>> {
         let bounds = self.callout_header_bounds(self.callout_menu.as_ref()?.block)?;
-        Some(point(bounds.left(), bounds.bottom() + px(4.)))
+        Some(menu::below(bounds))
     }
 }
 
@@ -166,11 +151,7 @@ pub(crate) fn render(
     cx: &gpui::App,
 ) -> Option<gpui::AnyElement> {
     use gpui::prelude::FluentBuilder as _;
-    use gpui::{
-        InteractiveElement as _, IntoElement as _, ParentElement as _, Role,
-        StatefulInteractiveElement as _, Styled as _, anchored, deferred, div,
-    };
-    use gpui_kit::base::TestSupportExt as _;
+    use gpui::{IntoElement as _, ParentElement as _, Styled as _, div};
     use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _};
 
     const ICON_CHECK: &[u8] = include_bytes!("../assets/icons/check.svg");
@@ -182,7 +163,7 @@ pub(crate) fn render(
     let current = s.callout_kind(menu.block);
     let highlighted = menu.highlighted;
     let theme = cx.theme();
-    let item = |ix: usize, kind: Option<CalloutKind>| {
+    let option = |ix: usize, kind: Option<CalloutKind>| {
         let on = ix == highlighted;
         let (label, icon) = match kind {
             Some(kind) => (
@@ -200,26 +181,8 @@ pub(crate) fn render(
                     .text_color(theme.muted_foreground),
             ),
         };
-        let fg = if on {
-            theme.accent_foreground
-        } else {
-            theme.popover_foreground
-        };
-        let entity = state.clone();
-        let hover_entity = state.clone();
-        div()
-            .id(("callout-menu-item", ix))
-            .role(Role::ListBoxOption)
-            .test_support()
-            .aria_label(label)
-            .flex()
-            .items_center()
-            .gap_2()
-            .px_2()
-            .py_1()
-            .rounded(theme.radius)
-            .text_color(fg)
-            .when(on, |this| this.bg(theme.accent))
+        let fg = menu::option_color(on, cx);
+        menu::option_row(state, MenuSlot::Callout, ix, label, on, cx)
             .child(icon)
             .child(div().flex_1().child(label))
             // A fixed slot keeps the names aligned whether or not they are
@@ -231,64 +194,15 @@ pub(crate) fn render(
                         this.child(Icon::default().data(ICON_CHECK).small().text_color(fg))
                     }),
             )
-            .on_hover(move |hovered, _, cx| {
-                if *hovered {
-                    hover_entity.update(cx, |state, cx| {
-                        if let Some(menu) = &mut state.callout_menu
-                            && menu.highlighted != ix
-                        {
-                            menu.highlighted = ix;
-                            cx.notify();
-                        }
-                    });
-                }
-            })
-            .on_mouse_down(gpui::MouseButton::Left, move |_, _, cx| {
-                cx.stop_propagation();
-                entity.update(cx, |state, cx| state.callout_menu_pick(ix, cx));
-            })
             .into_any_element()
     };
-    let (types, plain) = ENTRIES.split_at(ENTRIES.len() - 1);
-    let types = types
+    let (types, plain) = CALLOUT_TYPES.split_at(CALLOUT_TYPES.len() - 1);
+    let mut options: Vec<_> = types
         .iter()
         .enumerate()
-        .map(|(ix, kind)| item(ix, *kind))
-        .collect::<Vec<_>>();
-    let plain = item(types.len(), plain[0]);
-    let entity = state.clone();
-    Some(
-        deferred(
-            anchored()
-                .position(at)
-                .position_mode(gpui::AnchoredPositionMode::Window)
-                .snap_to_window_with_margin(px(8.))
-                .child(
-                    div()
-                        .id("block-editor-callout-menu")
-                        .role(Role::ListBox)
-                        .test_support()
-                        .aria_label("Callout type")
-                        .occlude()
-                        .min_w(px(200.))
-                        .p_1()
-                        .flex()
-                        .flex_col()
-                        .bg(theme.popover)
-                        .text_sm()
-                        .border_1()
-                        .border_color(theme.border)
-                        .rounded(theme.radius)
-                        .shadow_md()
-                        .on_mouse_down_out(move |_, _, cx| {
-                            entity.update(cx, |state, cx| state.close_callout_menu(cx));
-                        })
-                        .children(types)
-                        .child(div().my_1().h_px().bg(theme.border))
-                        .child(plain),
-                ),
-        )
-        .with_priority(1)
-        .into_any_element(),
-    )
+        .map(|(ix, kind)| option(ix, *kind))
+        .collect();
+    options.push(div().my_1().h_px().bg(theme.border).into_any_element());
+    options.push(option(types.len(), plain[0]));
+    Some(menu::popover(state, MenuSlot::Callout, at, options, cx))
 }

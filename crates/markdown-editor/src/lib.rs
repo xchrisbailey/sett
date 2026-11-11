@@ -65,6 +65,8 @@ mod insert_menu;
 mod kind;
 mod markdown_source;
 mod marks;
+// FORK: what the Insert Menu and the Callout type menu share.
+mod menu;
 mod order;
 mod position;
 mod projection;
@@ -92,7 +94,7 @@ pub use editor::BlockEditorModel;
 pub use element::BlockEditor;
 pub use gpui_kit::base::text::editor_host::ColumnAlign;
 pub use input_rule::InputRule;
-pub use insert_menu::InsertMenuItem;
+pub use insert_menu::InsertMenuOption;
 /// Shows or hides the optional toolbar. Unbound by default; bind it in the
 /// `"BlockEditor"` key context, e.g. `KeyBinding::new("cmd-shift-t", ToggleToolbar, Some("BlockEditor"))`.
 pub use state::ToggleToolbar;

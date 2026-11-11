@@ -436,11 +436,11 @@ pub struct BlockEditorState {
     pub(crate) pointer_hand: bool,
     /// The open table grip menu (D20).
     pub(crate) table_menu: Option<super::table_ui::TableMenu>,
-    /// FORK: the open Insert Menu, and the entries it offers.
-    pub(crate) insert_menu: Option<super::insert_menu::InsertMenu>,
-    pub(crate) insert_menu_items: Vec<super::insert_menu::InsertMenuItem>,
+    /// FORK: the open Insert Menu, and the options it offers.
+    pub(crate) insert_menu: Option<super::menu::OpenMenu>,
+    pub(crate) insert_menu_options: Vec<super::insert_menu::InsertMenuOption>,
     /// FORK: the open Callout type menu.
-    pub(crate) callout_menu: Option<super::callout_menu::CalloutMenu>,
+    pub(crate) callout_menu: Option<super::menu::OpenMenu>,
     /// The table grips the pointer shows (to repaint on change).
     pub(crate) table_hover: Vec<(BlockId, crate::TableLine)>,
     /// The pointer is on a table grip (grab cursor).
@@ -513,7 +513,7 @@ impl BlockEditorState {
             pointer_hand: false,
             table_menu: None,
             insert_menu: None,
-            insert_menu_items: super::insert_menu::InsertMenuItem::defaults(),
+            insert_menu_options: super::insert_menu::InsertMenuOption::defaults(),
             callout_menu: None,
             table_hover: Vec::new(),
             grip_hover: false,
@@ -581,14 +581,14 @@ impl BlockEditorState {
         self
     }
 
-    /// FORK: builder for the Insert Menu's entries. The default is
-    /// [`InsertMenuItem::defaults`](super::InsertMenuItem::defaults); pass an
+    /// FORK: builder for the Insert Menu's options. The default is
+    /// [`InsertMenuOption::defaults`](super::InsertMenuOption::defaults); pass an
     /// empty list to turn the menu off.
-    pub fn with_insert_menu_items(
+    pub fn with_insert_menu_options(
         mut self,
-        items: impl IntoIterator<Item = super::insert_menu::InsertMenuItem>,
+        options: impl IntoIterator<Item = super::insert_menu::InsertMenuOption>,
     ) -> Self {
-        self.insert_menu_items = items.into_iter().collect();
+        self.insert_menu_options = options.into_iter().collect();
         self
     }
 
@@ -2304,6 +2304,7 @@ impl BlockEditorState {
     ) {
         self.close_table_menu(cx);
     }
+    // FORK: the Insert Menu's and Callout type menu's key actions.
     pub(crate) fn on_insert_menu_up(
         &mut self,
         _: &InsertMenuUp,
@@ -2336,7 +2337,7 @@ impl BlockEditorState {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.close_insert_menu(cx);
+        self.close_menu(super::menu::MenuSlot::Insert, cx);
     }
     pub(crate) fn on_callout_menu_up(
         &mut self,
@@ -2370,7 +2371,7 @@ impl BlockEditorState {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.close_callout_menu(cx);
+        self.close_menu(super::menu::MenuSlot::Callout, cx);
     }
     fn table_key(&mut self, edit: Option<crate::TableEdit>, cx: &mut Context<Self>) {
         if self.readonly || self.model.current_cell().is_none() {
