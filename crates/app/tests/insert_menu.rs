@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use common::{Fixture, click_label, open_shell};
-use gpui_kit::test::{TestQueryExt as _, TestWindowExt as _};
+use gpui_kit::test::{TestEventExt as _, TestQueryExt as _, TestWindowExt as _};
 use gpui_kit::{AppContext as _, TestAppContext};
 use sett::Selection;
 use sett_store::Change;
@@ -142,6 +142,51 @@ fn escape_closes_and_keeps_the_typed_text(cx: &mut TestAppContext) {
     press(cx, &f, "enter");
     input(cx, &f, "x");
     assert_eq!(saved_body(cx, &path), "First line\n\n/he\n\nx\n");
+}
+
+#[gpui_kit::test]
+fn clicking_outside_closes_it_without_a_pick(cx: &mut TestAppContext) {
+    let (f, path) = on_a_new_line(cx);
+    input(cx, &f, "/");
+    // Down to Heading 2: a click outside must not pick it.
+    press(cx, &f, "down");
+    cx.update_window(f.window, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("note-plan", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert!(!menu_open(cx, &f));
+    assert_eq!(saved_body(cx, &path), "First line\n\n/\n");
+}
+
+#[gpui_kit::test]
+fn moving_the_caret_out_of_the_block_closes_it(cx: &mut TestAppContext) {
+    let (f, path) = on_a_new_line(cx);
+    input(cx, &f, "/he");
+    // ↑/↓ belong to the menu; jump to the start of the body instead.
+    press(cx, &f, "secondary-up");
+    assert!(!menu_open(cx, &f));
+    input(cx, &f, "> ");
+    assert!(!menu_open(cx, &f));
+
+    // Back on the `/he` line, reopen it and click into the other paragraph.
+    press(cx, &f, "secondary-down backspace backspace backspace");
+    input(cx, &f, "/");
+    assert!(menu_open(cx, &f));
+    cx.update_window(f.window, |_, window, cx| {
+        window.render_frame(cx);
+        // The first line, clear of the menu hanging under the last one.
+        let body = window.find("note-body").bounds();
+        let at = body.origin + gpui_kit::point(gpui_kit::px(40.), gpui_kit::px(8.));
+        window.pointer_move(at, None, cx);
+        window.pointer_down(at, gpui_kit::MouseButton::Left, cx);
+        window.pointer_up(at, gpui_kit::MouseButton::Left, cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert!(!menu_open(cx, &f));
+    assert_eq!(saved_body(cx, &path), "> First line\n\n/\n");
 }
 
 #[gpui_kit::test]
