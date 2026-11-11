@@ -734,6 +734,13 @@ impl BlockEditorState {
         self.marked.is_some()
     }
 
+    /// FORK: like `is_composing`, but also true during a composition's first
+    /// edit, which runs before its marked range is recorded. The Insert Menu
+    /// holds still for all of it.
+    pub(crate) fn composition_in_progress(&self) -> bool {
+        self.marked.is_some() || self.composition_open
+    }
+
     /// The headless model (document, selection, history).
     pub fn model(&self) -> &BlockEditorModel {
         &self.model
@@ -996,6 +1003,9 @@ impl BlockEditorState {
         if std::mem::take(&mut self.composition_open) {
             self.model.history.commit_transaction();
         }
+        // FORK: the Insert Menu held still while composing; the committed
+        // (or cancelled) text filters it now.
+        self.sync_insert_menu();
     }
 
     /// Whether an IME undo group is open (tests: it must never leak).
@@ -2922,8 +2932,10 @@ impl EntityInputHandler for BlockEditorState {
         Some(byte_to_utf16(text, m.range.start)..byte_to_utf16(text, m.range.end))
     }
 
-    fn unmark_text(&mut self, _: &mut Window, _: &mut Context<Self>) {
+    fn unmark_text(&mut self, _: &mut Window, cx: &mut Context<Self>) {
         self.end_composition();
+        // FORK: ending a composition can refilter or close the Insert Menu.
+        cx.notify();
     }
 
     fn paste(&mut self, item: ClipboardItem, _: &mut Window, cx: &mut Context<Self>) {

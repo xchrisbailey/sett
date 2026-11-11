@@ -129,6 +129,19 @@ pub(crate) struct InsertMenu {
 }
 
 impl BlockEditorModel {
+    /// The text typed after `block`'s `/`, up to the caret, or to
+    /// `composing_from` (where an IME composition starts) so uncommitted text
+    /// never filters the menu.
+    pub(crate) fn insert_menu_query(
+        &self,
+        block: BlockId,
+        composing_from: Option<usize>,
+    ) -> Option<&str> {
+        let caret = self.caret()?;
+        let end = composing_from.map_or(caret.offset, |from| from.min(caret.offset));
+        self.doc.leaf_text(block)?.get(1..end)
+    }
+
     /// Clear `block`'s text (the typed `/query`) and run `command` on it, as
     /// one undo step. A divider replaces the paragraph: the rule goes in its
     /// place and the empty paragraph, with the caret, moves below it.
@@ -161,9 +174,11 @@ impl BlockEditorState {
     /// The text typed after the `/`, while the menu is open.
     pub fn insert_menu_query(&self) -> Option<&str> {
         let menu = self.insert_menu.as_ref()?;
-        let caret = self.model.caret()?;
-        let text = self.model.doc.leaf_text(menu.block)?;
-        text.get(1..caret.offset)
+        let composing_from = self
+            .marked_range()
+            .filter(|(block, _)| *block == menu.block)
+            .map(|(_, range)| range.start);
+        self.model.insert_menu_query(menu.block, composing_from)
     }
 
     /// The entries the current query matches, in menu order. Callouts are
@@ -209,11 +224,15 @@ impl BlockEditorState {
     }
 
     /// Close the menu unless it still applies: the caret sits after the `/`
-    /// in the menu's paragraph and the query matches something.
+    /// in the menu's paragraph and the query matches something. Nothing
+    /// changes during IME composition; `end_composition` syncs again.
     pub(crate) fn sync_insert_menu(&mut self) {
         let Some(menu) = &self.insert_menu else {
             return;
         };
+        if self.composition_in_progress() {
+            return;
+        }
         let doc = &self.model.doc;
         let still = !self.readonly
             && doc.kind(menu.block) == Some(&BlockKindData::Paragraph)
@@ -430,6 +449,19 @@ mod tests {
             ["Note", "Tip", "Important", "Warning", "Caution"]
         );
         assert_eq!(labels("warn"), ["Warning"]);
+    }
+
+    /// An IME composition after the `/` is not part of the query until it is
+    /// committed, so the list neither refilters nor closes while composing.
+    #[test]
+    fn an_ime_composition_is_left_out_of_the_query() {
+        let mut model = crate::tests::model("/he");
+        let pos = crate::tests::caret_in(&mut model, 0, 3);
+        model
+            .insert_text("日本", crate::transaction::EditOrigin::Ime)
+            .unwrap();
+        assert_eq!(model.insert_menu_query(pos.block, Some(3)), Some("he"));
+        assert_eq!(model.insert_menu_query(pos.block, None), Some("he日本"));
     }
 
     /// Picking each default from `/query` in an empty paragraph saves the
