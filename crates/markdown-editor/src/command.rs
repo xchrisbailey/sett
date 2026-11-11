@@ -1679,6 +1679,17 @@ impl BlockEditorModel {
         Ok(true)
     }
 
+    /// FORK: the top-level Callout holding the caret, if any.
+    pub(crate) fn caret_callout(&self) -> Option<BlockId> {
+        let resolved = self.caret_resolved().ok()?;
+        resolved.path.get(1).copied().filter(|id| {
+            matches!(
+                self.doc.kind(*id),
+                Some(BlockKindData::Blockquote { callout: Some(_) })
+            )
+        })
+    }
+
     /// FORK: only a top-level quote is drawn as a Callout, so that is the
     /// one the type is set on, even from a quote nested inside it.
     fn set_callout(&mut self, kind: Option<CalloutKind>) -> Result<bool, CommandError> {
@@ -1689,6 +1700,20 @@ impl BlockEditorModel {
             .copied()
             .filter(|id| matches!(self.doc.kind(*id), Some(BlockKindData::Blockquote { .. })))
             .ok_or(CommandError::Unsupported("callout here"))?;
+        self.retype_quote(quote, kind)
+    }
+
+    /// FORK: set the type of the quote `quote` (`None` makes it a plain
+    /// quote), leaving the selection where it is. The type menu uses this for
+    /// a callout the caret may not be in.
+    pub(crate) fn retype_quote(
+        &mut self,
+        quote: BlockId,
+        kind: Option<CalloutKind>,
+    ) -> Result<bool, CommandError> {
+        if !matches!(self.doc.kind(quote), Some(BlockKindData::Blockquote { .. })) {
+            return Err(CommandError::Unsupported("callout here"));
+        }
         let selection = self.selection.clone();
         self.transact(EditOrigin::Command("set_callout"), |tx| {
             tx.set_kind(

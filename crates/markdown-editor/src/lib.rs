@@ -44,6 +44,8 @@
 extern crate gpui_kit as gpui;
 
 mod callout;
+// FORK: the Callout type menu.
+mod callout_menu;
 mod command;
 mod cull;
 mod direct;

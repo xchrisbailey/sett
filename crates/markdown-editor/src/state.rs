@@ -80,6 +80,11 @@ actions!(
         InsertMenuDown,
         InsertMenuPick,
         InsertMenuClose,
+        OpenCalloutMenu,
+        CalloutMenuUp,
+        CalloutMenuDown,
+        CalloutMenuPick,
+        CalloutMenuClose,
         Indent,
         Outdent,
         Copy,
@@ -215,6 +220,9 @@ pub(crate) fn init(cx: &mut App) {
         KeyBinding::new(platform_key!("cmd", "alt-down"), TableInsertRowBelow, ctx),
         KeyBinding::new(platform_key!("cmd", "alt-backspace"), TableDeleteLine, ctx),
         KeyBinding::new("escape", CloseTableMenu, Some("BlockEditor && table_menu")),
+        // FORK: the Callout type menu, for the callout holding the caret;
+        // elsewhere the keystroke propagates.
+        KeyBinding::new(platform_key!("cmd", "alt-c"), OpenCalloutMenu, ctx),
         KeyBinding::new("shift-enter", SoftBreak, ctx),
         KeyBinding::new(platform_key!("cmd", "enter"), ExitBlock, ctx),
         KeyBinding::new(platform_key!("cmd", "c"), Copy, ctx),
@@ -243,6 +251,20 @@ pub(crate) fn init(cx: &mut App) {
             "escape",
             InsertMenuClose,
             Some("BlockEditor && insert_menu"),
+        ),
+        // FORK: the Callout type menu's keys, likewise.
+        KeyBinding::new("up", CalloutMenuUp, Some("BlockEditor && callout_menu")),
+        KeyBinding::new("down", CalloutMenuDown, Some("BlockEditor && callout_menu")),
+        KeyBinding::new(
+            "enter",
+            CalloutMenuPick,
+            Some("BlockEditor && callout_menu"),
+        ),
+        KeyBinding::new("tab", CalloutMenuPick, Some("BlockEditor && callout_menu")),
+        KeyBinding::new(
+            "escape",
+            CalloutMenuClose,
+            Some("BlockEditor && callout_menu"),
         ),
     ]);
 }
@@ -417,6 +439,8 @@ pub struct BlockEditorState {
     /// FORK: the open Insert Menu, and the entries it offers.
     pub(crate) insert_menu: Option<super::insert_menu::InsertMenu>,
     pub(crate) insert_menu_items: Vec<super::insert_menu::InsertMenuItem>,
+    /// FORK: the open Callout type menu.
+    pub(crate) callout_menu: Option<super::callout_menu::CalloutMenu>,
     /// The table grips the pointer shows (to repaint on change).
     pub(crate) table_hover: Vec<(BlockId, crate::TableLine)>,
     /// The pointer is on a table grip (grab cursor).
@@ -449,6 +473,7 @@ impl BlockEditorState {
                 this.model.break_coalescing();
                 this.end_composition();
                 this.insert_menu = None;
+                this.callout_menu = None;
                 cx.emit(BlockEditorEvent::Blur);
             }),
             cx.observe_window_activation(window, |this, window, cx| {
@@ -489,6 +514,7 @@ impl BlockEditorState {
             table_menu: None,
             insert_menu: None,
             insert_menu_items: super::insert_menu::InsertMenuItem::defaults(),
+            callout_menu: None,
             table_hover: Vec::new(),
             grip_hover: false,
             _subscriptions: subscriptions,
@@ -514,6 +540,9 @@ impl BlockEditorState {
         }
         if self.insert_menu.is_some() {
             context.push_str(" insert_menu");
+        }
+        if self.callout_menu.is_some() {
+            context.push_str(" callout_menu");
         }
         context
     }
@@ -916,6 +945,8 @@ impl BlockEditorState {
 
     pub(crate) fn after_edit(&mut self, origin: EditOrigin, cx: &mut Context<Self>) {
         self.sync_insert_menu();
+        // The type menu is for the document as it was when it opened.
+        self.callout_menu = None;
         self.goal_x = None;
         self.reveal.set(true);
         self.pause_blink(cx);
@@ -929,6 +960,7 @@ impl BlockEditorState {
 
     fn selection_changed(&mut self, cx: &mut Context<Self>) {
         self.sync_insert_menu();
+        self.callout_menu = None;
         self.reveal.set(true);
         self.pause_blink(cx);
         cx.emit(BlockEditorEvent::SelectionChanged);
@@ -959,7 +991,7 @@ impl BlockEditorState {
         }
     }
 
-    fn end_composition(&mut self) {
+    pub(crate) fn end_composition(&mut self) {
         self.marked = None;
         if std::mem::take(&mut self.composition_open) {
             self.model.history.commit_transaction();
@@ -2295,6 +2327,40 @@ impl BlockEditorState {
         cx: &mut Context<Self>,
     ) {
         self.close_insert_menu(cx);
+    }
+    pub(crate) fn on_callout_menu_up(
+        &mut self,
+        _: &CalloutMenuUp,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.callout_menu_move(false, cx);
+    }
+    pub(crate) fn on_callout_menu_down(
+        &mut self,
+        _: &CalloutMenuDown,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.callout_menu_move(true, cx);
+    }
+    pub(crate) fn on_callout_menu_pick(
+        &mut self,
+        _: &CalloutMenuPick,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(ix) = self.callout_menu.as_ref().map(|m| m.highlighted) {
+            self.callout_menu_pick(ix, cx);
+        }
+    }
+    pub(crate) fn on_callout_menu_close(
+        &mut self,
+        _: &CalloutMenuClose,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.close_callout_menu(cx);
     }
     fn table_key(&mut self, edit: Option<crate::TableEdit>, cx: &mut Context<Self>) {
         if self.readonly || self.model.current_cell().is_none() {

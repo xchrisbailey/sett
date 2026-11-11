@@ -16,7 +16,7 @@ use gpui::{
 };
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::base::text::editor_host::{BlockNode, FlowPosition, RenderContext};
-use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, h_flex, tooltip::Tooltip, v_flex};
 
 use crate::{id::BlockId, kind::CalloutKind};
 
@@ -38,7 +38,7 @@ const TINT: f32 = 0.08;
 /// WCAG AA for normal-size text.
 const MIN_CONTRAST: f32 = 4.5;
 
-fn icon(kind: CalloutKind) -> &'static [u8] {
+pub(crate) fn icon(kind: CalloutKind) -> &'static [u8] {
     match kind {
         CalloutKind::Note => ICON_NOTE,
         CalloutKind::Tip => ICON_TIP,
@@ -50,7 +50,7 @@ fn icon(kind: CalloutKind) -> &'static [u8] {
 
 /// The type's colour. Important has no semantic token, so it takes the
 /// palette's magenta.
-fn color(kind: CalloutKind, cx: &App) -> Hsla {
+pub(crate) fn color(kind: CalloutKind, cx: &App) -> Hsla {
     let theme = cx.theme();
     match kind {
         CalloutKind::Note => theme.info,
@@ -85,9 +85,16 @@ pub(crate) fn render(
     let sink = headers.clone();
     let header = h_flex()
         .id(("callout-header", id.as_u64() as usize))
-        .role(Role::Label)
+        .role(Role::Button)
         .test_support()
         .aria_label(format!("{} callout", kind.label()))
+        // Clicking opens the type menu; the tooltip names it and its
+        // otherwise hidden shortcut.
+        .tooltip(|window, cx| {
+            Tooltip::new("Change callout type")
+                .action(&crate::state::OpenCalloutMenu, Some(crate::state::CONTEXT))
+                .build(window, cx)
+        })
         .relative()
         .self_start()
         // Icon, name and chevron are parts of one control.

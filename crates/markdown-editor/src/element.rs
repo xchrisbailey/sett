@@ -414,6 +414,11 @@ impl RenderOnce for BlockEditor {
             .on_action(window.listener_for(s, BlockEditorState::on_insert_menu_down))
             .on_action(window.listener_for(s, BlockEditorState::on_insert_menu_pick))
             .on_action(window.listener_for(s, BlockEditorState::on_insert_menu_close))
+            .on_action(window.listener_for(s, BlockEditorState::on_open_callout_menu))
+            .on_action(window.listener_for(s, BlockEditorState::on_callout_menu_up))
+            .on_action(window.listener_for(s, BlockEditorState::on_callout_menu_down))
+            .on_action(window.listener_for(s, BlockEditorState::on_callout_menu_pick))
+            .on_action(window.listener_for(s, BlockEditorState::on_callout_menu_close))
             .on_action(window.listener_for(s, BlockEditorState::on_toggle_bold))
             .on_action(window.listener_for(s, BlockEditorState::on_toggle_toolbar))
             .on_action(window.listener_for(s, BlockEditorState::on_toggle_italic))
@@ -428,6 +433,7 @@ impl RenderOnce for BlockEditor {
             .on_action(window.listener_for(s, BlockEditorState::on_paste_plain))
             .children(super::table_ui::render_menu(&self.state, cx))
             .children(super::insert_menu::render(&self.state, cx))
+            .children(super::callout_menu::render(&self.state, cx))
             .child(EditorRoot {
                 state: self.state.clone(),
                 child: Some(
@@ -818,6 +824,18 @@ impl Element for EditorRoot {
                         state.close_table_menu(cx);
                     }
                     hit
+                })
+            {
+                let focus = entity.read(cx).focus_handle.clone();
+                window.focus(&focus, cx);
+                cx.stop_propagation();
+                return;
+            }
+            // FORK: a callout's header opens its type menu, leaving the caret
+            // where it is.
+            if !event.modifiers.shift
+                && entity.update(cx, |state, cx| {
+                    state.click_callout_header(event.position, cx)
                 })
             {
                 let focus = entity.read(cx).focus_handle.clone();
