@@ -184,6 +184,16 @@ impl BlockKindData {
         }
     }
 
+    /// FORK: the Callout type, when this is a quote that is a Callout.
+    pub(crate) fn callout_kind(&self) -> Option<CalloutKind> {
+        match self {
+            Self::Blockquote {
+                callout: Some(callout),
+            } => Some(callout.kind),
+            _ => None,
+        }
+    }
+
     /// Whether this kind holds child blocks.
     pub(crate) fn is_container(&self) -> bool {
         matches!(

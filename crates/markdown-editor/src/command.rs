@@ -1683,10 +1683,10 @@ impl BlockEditorModel {
     pub(crate) fn caret_callout(&self) -> Option<BlockId> {
         let resolved = self.caret_resolved().ok()?;
         resolved.path.get(1).copied().filter(|id| {
-            matches!(
-                self.doc.kind(*id),
-                Some(BlockKindData::Blockquote { callout: Some(_) })
-            )
+            self.doc
+                .kind(*id)
+                .and_then(BlockKindData::callout_kind)
+                .is_some()
         })
     }
 

@@ -254,14 +254,10 @@ impl RenderOnce for BlockEditor {
                 let is_last_node = node_ix + 1 == count;
                 let node = &snapshot.blocks[unit.block].nodes[unit.node];
                 // FORK: a top-level Callout draws its own box (#16).
-                let callout = match (&unit.items, self.state.read(cx).model.doc.kind(unit.id)) {
-                    (
-                        None,
-                        Some(super::kind::BlockKindData::Blockquote {
-                            callout: Some(callout),
-                        }),
-                    ) => Some(callout.kind),
-                    _ => None,
+                // A list chunk (`items`) is never a quote.
+                let callout = match unit.items {
+                    None => self.state.read(cx).callout_kind(unit.id),
+                    Some(_) => None,
                 };
                 let element = match (&unit.items, node) {
                     (None, BlockNode::Blockquote { children, .. }) if let Some(kind) = callout => {

@@ -34,13 +34,11 @@ impl BlockEditorState {
     }
 
     /// The type of the callout `block`, if it is one.
-    fn callout_kind(&self, block: BlockId) -> Option<CalloutKind> {
-        match self.model.doc.kind(block) {
-            Some(BlockKindData::Blockquote {
-                callout: Some(callout),
-            }) => Some(callout.kind),
-            _ => None,
-        }
+    pub(crate) fn callout_kind(&self, block: BlockId) -> Option<CalloutKind> {
+        self.model
+            .doc
+            .kind(block)
+            .and_then(BlockKindData::callout_kind)
     }
 
     /// Open the menu for the callout `block`, highlighting its type.
