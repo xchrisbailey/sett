@@ -76,6 +76,10 @@ actions!(
         TableInsertRowBelow,
         TableDeleteLine,
         CloseTableMenu,
+        InsertMenuUp,
+        InsertMenuDown,
+        InsertMenuPick,
+        InsertMenuClose,
         Indent,
         Outdent,
         Copy,
@@ -228,6 +232,17 @@ pub(crate) fn init(cx: &mut App) {
             "ctrl-enter",
             SoftBreak,
             Some("BlockEditor && submit == enter"),
+        ),
+        // FORK: the Insert Menu's keys win over the editor's while it is
+        // open (registered last, so they take precedence).
+        KeyBinding::new("up", InsertMenuUp, Some("BlockEditor && insert_menu")),
+        KeyBinding::new("down", InsertMenuDown, Some("BlockEditor && insert_menu")),
+        KeyBinding::new("enter", InsertMenuPick, Some("BlockEditor && insert_menu")),
+        KeyBinding::new("tab", InsertMenuPick, Some("BlockEditor && insert_menu")),
+        KeyBinding::new(
+            "escape",
+            InsertMenuClose,
+            Some("BlockEditor && insert_menu"),
         ),
     ]);
 }
@@ -386,7 +401,7 @@ pub struct BlockEditorState {
     pub(crate) dragging: bool,
     /// A press on a block handle, and the drag to reorder it (D22).
     pub(crate) block_drag: Option<BlockDrag>,
-    readonly: bool,
+    pub(crate) readonly: bool,
     image_policy: super::ImagePolicy,
     submit_policy: SubmitPolicy,
     clipboard_policy: ClipboardPolicy,
@@ -399,6 +414,9 @@ pub struct BlockEditorState {
     pub(crate) pointer_hand: bool,
     /// The open table grip menu (D20).
     pub(crate) table_menu: Option<super::table_ui::TableMenu>,
+    /// FORK: the open Insert Menu, and the entries it offers.
+    pub(crate) insert_menu: Option<super::insert_menu::InsertMenu>,
+    pub(crate) insert_menu_items: Vec<super::insert_menu::InsertMenuItem>,
     /// The table grips the pointer shows (to repaint on change).
     pub(crate) table_hover: Vec<(BlockId, crate::TableLine)>,
     /// The pointer is on a table grip (grab cursor).
@@ -430,6 +448,7 @@ impl BlockEditorState {
                 this.blink_cursor.update(cx, |b, cx| b.stop(cx));
                 this.model.break_coalescing();
                 this.end_composition();
+                this.insert_menu = None;
                 cx.emit(BlockEditorEvent::Blur);
             }),
             cx.observe_window_activation(window, |this, window, cx| {
@@ -468,6 +487,8 @@ impl BlockEditorState {
             hovered_link: None,
             pointer_hand: false,
             table_menu: None,
+            insert_menu: None,
+            insert_menu_items: super::insert_menu::InsertMenuItem::defaults(),
             table_hover: Vec::new(),
             grip_hover: false,
             _subscriptions: subscriptions,
@@ -483,16 +504,18 @@ impl BlockEditorState {
     pub fn set_submit_policy(&mut self, policy: SubmitPolicy) {
         self.submit_policy = policy;
     }
-    pub(crate) fn key_context(&self) -> &'static str {
-        match (
-            self.submit_policy == SubmitPolicy::Enter,
-            self.table_menu.is_some(),
-        ) {
-            (true, false) => "BlockEditor submit=enter",
-            (true, true) => "BlockEditor submit=enter table_menu",
-            (false, false) => CONTEXT,
-            (false, true) => "BlockEditor table_menu",
+    pub(crate) fn key_context(&self) -> String {
+        let mut context = String::from(CONTEXT);
+        if self.submit_policy == SubmitPolicy::Enter {
+            context.push_str(" submit=enter");
         }
+        if self.table_menu.is_some() {
+            context.push_str(" table_menu");
+        }
+        if self.insert_menu.is_some() {
+            context.push_str(" insert_menu");
+        }
+        context
     }
     pub fn with_clipboard_policy(mut self, policy: ClipboardPolicy) -> Self {
         self.clipboard_policy = policy;
@@ -526,6 +549,17 @@ impl BlockEditorState {
         filter: impl Fn(super::InputRule, &str) -> bool + Send + Sync + 'static,
     ) -> Self {
         self.input_rule_filter = Some(Arc::new(filter));
+        self
+    }
+
+    /// FORK: builder for the Insert Menu's entries. The default is
+    /// [`InsertMenuItem::defaults`](super::InsertMenuItem::defaults); pass an
+    /// empty list to turn the menu off.
+    pub fn with_insert_menu_items(
+        mut self,
+        items: impl IntoIterator<Item = super::insert_menu::InsertMenuItem>,
+    ) -> Self {
+        self.insert_menu_items = items.into_iter().collect();
         self
     }
 
@@ -880,7 +914,8 @@ impl BlockEditorState {
 
     // ---- internal edit plumbing -------------------------------------------
 
-    fn after_edit(&mut self, origin: EditOrigin, cx: &mut Context<Self>) {
+    pub(crate) fn after_edit(&mut self, origin: EditOrigin, cx: &mut Context<Self>) {
+        self.sync_insert_menu();
         self.goal_x = None;
         self.reveal.set(true);
         self.pause_blink(cx);
@@ -893,6 +928,7 @@ impl BlockEditorState {
     }
 
     fn selection_changed(&mut self, cx: &mut Context<Self>) {
+        self.sync_insert_menu();
         self.reveal.set(true);
         self.pause_blink(cx);
         cx.emit(BlockEditorEvent::SelectionChanged);
@@ -2220,6 +2256,40 @@ impl BlockEditorState {
     ) {
         self.close_table_menu(cx);
     }
+    pub(crate) fn on_insert_menu_up(
+        &mut self,
+        _: &InsertMenuUp,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.insert_menu_move(false, cx);
+    }
+    pub(crate) fn on_insert_menu_down(
+        &mut self,
+        _: &InsertMenuDown,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.insert_menu_move(true, cx);
+    }
+    pub(crate) fn on_insert_menu_pick(
+        &mut self,
+        _: &InsertMenuPick,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(ix) = self.insert_menu_highlighted() {
+            self.insert_menu_pick(ix, cx);
+        }
+    }
+    pub(crate) fn on_insert_menu_close(
+        &mut self,
+        _: &InsertMenuClose,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.close_insert_menu(cx);
+    }
     fn table_key(&mut self, edit: Option<crate::TableEdit>, cx: &mut Context<Self>) {
         if self.readonly || self.model.current_cell().is_none() {
             cx.propagate();
@@ -2805,7 +2875,9 @@ impl EntityInputHandler for BlockEditorState {
         };
         self.edit(origin, |m| m.insert_text(text, origin), cx);
         self.end_composition();
-        if text == " " {
+        if text == "/" && !composing {
+            self.maybe_open_insert_menu(cx);
+        } else if text == " " {
             self.apply_input_rule(cx);
         } else if text.ends_with(['`', '*', '~']) && self.rule_on(RuleKind::InlineMarks) {
             self.apply_mark_rule(cx);

@@ -55,6 +55,8 @@ mod id;
 mod import;
 mod inline;
 mod input_rule;
+// FORK: the Insert Menu.
+mod insert_menu;
 mod kind;
 mod markdown_source;
 mod marks;
@@ -85,6 +87,7 @@ pub use editor::BlockEditorModel;
 pub use element::BlockEditor;
 pub use gpui_kit::base::text::editor_host::ColumnAlign;
 pub use input_rule::InputRule;
+pub use insert_menu::InsertMenuItem;
 /// Shows or hides the optional toolbar. Unbound by default; bind it in the
 /// `"BlockEditor"` key context, e.g. `KeyBinding::new("cmd-shift-t", ToggleToolbar, Some("BlockEditor"))`.
 pub use state::ToggleToolbar;

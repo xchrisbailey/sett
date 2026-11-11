@@ -329,7 +329,7 @@ impl RenderOnce for BlockEditor {
             .when(window.is_a11y_active() || cfg!(test), |this| {
                 this.aria_value(self.state.read(cx).accessible_value())
             })
-            .key_context(self.state.read(cx).key_context())
+            .key_context(self.state.read(cx).key_context().as_str())
             .track_focus(&focus)
             .cursor(if self.state.read(cx).grip_hover {
                 CursorStyle::OpenHand
@@ -383,6 +383,10 @@ impl RenderOnce for BlockEditor {
             .on_action(window.listener_for(s, BlockEditorState::on_table_insert_row_below))
             .on_action(window.listener_for(s, BlockEditorState::on_table_delete_line))
             .on_action(window.listener_for(s, BlockEditorState::on_close_table_menu))
+            .on_action(window.listener_for(s, BlockEditorState::on_insert_menu_up))
+            .on_action(window.listener_for(s, BlockEditorState::on_insert_menu_down))
+            .on_action(window.listener_for(s, BlockEditorState::on_insert_menu_pick))
+            .on_action(window.listener_for(s, BlockEditorState::on_insert_menu_close))
             .on_action(window.listener_for(s, BlockEditorState::on_toggle_bold))
             .on_action(window.listener_for(s, BlockEditorState::on_toggle_toolbar))
             .on_action(window.listener_for(s, BlockEditorState::on_toggle_italic))
@@ -396,6 +400,7 @@ impl RenderOnce for BlockEditor {
             .on_action(window.listener_for(s, BlockEditorState::on_native_paste))
             .on_action(window.listener_for(s, BlockEditorState::on_paste_plain))
             .children(super::table_ui::render_menu(&self.state, cx))
+            .children(super::insert_menu::render(&self.state, cx))
             .child(EditorRoot {
                 state: self.state.clone(),
                 child: Some(
