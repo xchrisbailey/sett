@@ -119,6 +119,17 @@ impl CalloutKind {
         }
     }
 
+    /// The type's name as the editor shows it (`Note`).
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Note => "Note",
+            Self::Tip => "Tip",
+            Self::Important => "Important",
+            Self::Warning => "Warning",
+            Self::Caution => "Caution",
+        }
+    }
+
     /// The type a marker names, in any case (`note`, `Note`, `NOTE`).
     pub fn from_marker(marker: &str) -> Option<Self> {
         Self::ALL

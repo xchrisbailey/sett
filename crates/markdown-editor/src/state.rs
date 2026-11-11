@@ -1513,6 +1513,12 @@ impl BlockEditorState {
         Some((pos.block, range, url))
     }
 
+    /// FORK: the Callout whose header row (icon and type name) is drawn
+    /// under the window point `at`, as of the last frame.
+    pub fn callout_header_at(&self, at: Point<Pixels>) -> Option<BlockId> {
+        self.frame.borrow().callout_header_at(at)
+    }
+
     /// The url of the link under the mouse, if any (D14 hover).
     pub fn hovered_link(&self) -> Option<&SharedString> {
         self.hovered_link.as_ref()

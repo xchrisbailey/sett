@@ -156,6 +156,7 @@ impl RenderOnce for BlockEditor {
             (state.cull.clone(), state.model.revision())
         };
         let mut children: Vec<AnyElement> = Vec::new();
+        let callout_headers = super::callout::HeaderSink::default();
         {
             let mut cull_state = cull.borrow_mut();
             cull_state.measured.clear();
@@ -252,7 +253,29 @@ impl RenderOnce for BlockEditor {
                 let flow = unit.flow;
                 let is_last_node = node_ix + 1 == count;
                 let node = &snapshot.blocks[unit.block].nodes[unit.node];
+                // FORK: a top-level Callout draws its own box (#16).
+                let callout = match (&unit.items, self.state.read(cx).model.doc.kind(unit.id)) {
+                    (
+                        None,
+                        Some(super::kind::BlockKindData::Blockquote {
+                            callout: Some(callout),
+                        }),
+                    ) => Some(callout.kind),
+                    _ => None,
+                };
                 let element = match (&unit.items, node) {
+                    (None, BlockNode::Blockquote { children, .. }) if let Some(kind) = callout => {
+                        super::callout::render(
+                            kind,
+                            unit.id,
+                            children,
+                            is_last_node,
+                            &node_cx,
+                            &callout_headers,
+                            window,
+                            cx,
+                        )
+                    }
                     (
                         Some((range, ids)),
                         BlockNode::List {
@@ -290,7 +313,11 @@ impl RenderOnce for BlockEditor {
                     _ => node.render(node_ix, flow.last(is_last_node), &node_cx, window, cx),
                 };
                 // Per-block accessibility node around the rendered block.
-                let element = match block_role(node) {
+                let role = match callout {
+                    Some(_) => Some((Role::Note, None)),
+                    None => block_role(node),
+                };
+                let element = match role {
                     Some((role, level)) => div()
                         .id(("block", unit.id.as_u64() as usize))
                         .role(role)
@@ -422,6 +449,7 @@ impl RenderOnce for BlockEditor {
                         .into_any_element(),
                 ),
                 content_bounds,
+                callout_headers,
                 padding: root_style.padding,
                 typography,
                 caret_was_visible,
@@ -441,6 +469,7 @@ struct EditorRoot {
     snapshot: Rc<Snapshot>,
     style: BlockEditorStyle,
     content_bounds: Rc<Cell<Bounds<Pixels>>>,
+    callout_headers: super::callout::HeaderSink,
     padding: Edges<DefiniteLength>,
     typography: TextStyle,
     caret_was_visible: bool,
@@ -536,6 +565,7 @@ impl Element for EditorRoot {
         cx: &mut App,
     ) -> Prepaint {
         if let Some(backgrounds) = self.backgrounds.take() {
+            self.callout_headers.borrow_mut().clear();
             let (_, geometries) = collect_leaf_geometry(backgrounds, || child.prepaint(window, cx));
             // Swap in the complete frame; handlers read it until the next one.
             let mut frame = super::frame::into_frame(
@@ -544,6 +574,7 @@ impl Element for EditorRoot {
                 &self.snapshot.tables,
             );
             frame.content = Some(self.content_bounds.get());
+            frame.callout_headers = self.callout_headers.take();
             {
                 let state = self.state.read(cx);
                 let doc = &state.model.doc;
