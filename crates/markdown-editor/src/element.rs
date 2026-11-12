@@ -899,6 +899,14 @@ impl Element for EditorRoot {
                 if !event.modifiers.shift && event.click_count >= 2 {
                     state.select_unit(event.click_count >= 3, cx);
                 }
+                // FORK: a plain single click on a Link chip opens it on
+                // release.
+                if !event.modifiers.shift
+                    && event.click_count == 1
+                    && !secondary_modifier().is_subset_of(&event.modifiers)
+                {
+                    state.press_chip(event.position);
+                }
             });
         });
         let entity = self.state.clone();
@@ -933,6 +941,7 @@ impl Element for EditorRoot {
             if phase == DispatchPhase::Bubble {
                 entity.update(cx, |state, cx| {
                     state.dragging = false;
+                    state.release_chip(cx);
                     state.finish_block_drag(cx);
                 });
             }
