@@ -7,12 +7,41 @@
 //! frame. Everything here maps between the model's offsets and the leaf
 //! indices gpui-kit reports.
 
-use std::{collections::HashMap, ops::Range, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, ops::Range, rc::Rc};
 
-use gpui::{Bounds, Pixels, Point, point, px, size};
+use gpui::{Bounds, IntoElement, Pixels, Point, Styled as _, canvas, point, px, size};
 use gpui_kit::base::text::editor_host::{ColumnAlign, LeafGeometry};
 
 use super::{id::BlockId, position::BlockPosition, projection::LeafInfo};
+
+/// The bounds of one control per block (a Callout's header, a Code Block's
+/// label), in window coordinates.
+pub(crate) type BlockBounds = Vec<(BlockId, Bounds<Pixels>)>;
+
+/// Where a frame's [`BlockBounds`] are recorded while the editor prepaints,
+/// before they move into the [`FrameLayout`].
+pub(crate) type BoundsSink = Rc<RefCell<BlockBounds>>;
+
+/// An invisible element that fills its parent and records the parent's
+/// bounds in `sink` under `id` each frame.
+pub(crate) fn record_bounds(sink: &BoundsSink, id: BlockId) -> impl IntoElement {
+    let sink = sink.clone();
+    canvas(
+        move |bounds, _, _| sink.borrow_mut().push((id, bounds)),
+        |_, _, _, _| {},
+    )
+    .absolute()
+    .top_0()
+    .left_0()
+    .size_full()
+}
+
+/// The block whose recorded bounds contain the window point `at`.
+fn bounds_at(list: &[(BlockId, Bounds<Pixels>)], at: Point<Pixels>) -> Option<BlockId> {
+    list.iter()
+        .find(|(_, bounds)| bounds.contains(&at))
+        .map(|(id, _)| *id)
+}
 
 /// Builds the frame from what `collect_leaf_geometry` returned.
 pub(crate) fn into_frame(
@@ -177,9 +206,9 @@ pub(crate) struct FrameLayout {
     /// text bounds only cover the text.
     pub(crate) content: Option<Bounds<Pixels>>,
     /// FORK: each drawn Callout's header row, for the type menu.
-    pub(crate) callout_headers: Vec<(BlockId, Bounds<Pixels>)>,
+    pub(crate) callout_headers: BlockBounds,
     /// FORK: each drawn Code Block's language label.
-    pub(crate) code_labels: Vec<(BlockId, Bounds<Pixels>)>,
+    pub(crate) code_labels: BlockBounds,
 }
 
 impl FrameLayout {
@@ -208,18 +237,12 @@ impl FrameLayout {
 
     /// FORK: the Callout whose header row is under a window point.
     pub(crate) fn callout_header_at(&self, at: Point<Pixels>) -> Option<BlockId> {
-        self.callout_headers
-            .iter()
-            .find(|(_, bounds)| bounds.contains(&at))
-            .map(|(id, _)| *id)
+        bounds_at(&self.callout_headers, at)
     }
 
     /// FORK: the Code Block whose language label is under a window point.
     pub(crate) fn code_label_at(&self, at: Point<Pixels>) -> Option<BlockId> {
-        self.code_labels
-            .iter()
-            .find(|(_, bounds)| bounds.contains(&at))
-            .map(|(id, _)| *id)
+        bounds_at(&self.code_labels, at)
     }
 
     /// Nearest caret position to a window point.

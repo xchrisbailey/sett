@@ -163,9 +163,9 @@ impl RenderOnce for BlockEditor {
         };
         let mut children: Vec<AnyElement> = Vec::new();
         // FORK: callout header bounds, filled at prepaint (`callout.rs`).
-        let callout_headers = super::callout::HeaderSink::default();
+        let callout_headers = super::frame::BoundsSink::default();
         // FORK: code language label bounds (`code_label.rs`).
-        let code_labels = super::code_label::LabelSink::default();
+        let code_labels = super::frame::BoundsSink::default();
         {
             let mut cull_state = cull.borrow_mut();
             cull_state.measured.clear();
@@ -527,9 +527,9 @@ struct EditorRoot {
     style: BlockEditorStyle,
     content_bounds: Rc<Cell<Bounds<Pixels>>>,
     /// FORK: where callout headers record their bounds this frame.
-    callout_headers: super::callout::HeaderSink,
+    callout_headers: super::frame::BoundsSink,
     /// FORK: where code language labels record their bounds this frame.
-    code_labels: super::code_label::LabelSink,
+    code_labels: super::frame::BoundsSink,
     padding: Edges<DefiniteLength>,
     typography: TextStyle,
     caret_was_visible: bool,

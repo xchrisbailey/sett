@@ -12,26 +12,24 @@
 //! says the language won't highlight. Its bounds are recorded each frame in
 //! `FrameLayout::code_labels` for hit-testing (`BlockEditorState::code_label_at`).
 
-use std::{cell::RefCell, rc::Rc};
-
 use gpui::{
-    AnyElement, App, Bounds, InteractiveElement as _, IntoElement, ParentElement as _, Pixels,
-    Role, StatefulInteractiveElement as _, Styled as _, Window, canvas, div,
-    prelude::FluentBuilder as _, px,
+    AnyElement, App, InteractiveElement as _, IntoElement, ParentElement as _, Role,
+    StatefulInteractiveElement as _, Styled as _, Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::base::text::editor_host::{BlockNode, FlowPosition, RenderContext};
 use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, h_flex, tooltip::Tooltip};
 
-use crate::{id::BlockId, language};
+use crate::{
+    frame::{BoundsSink, record_bounds},
+    id::BlockId,
+    language,
+};
 
 const ICON_CHEVRON: &[u8] = include_bytes!("../assets/icons/chevron-down.svg");
 
 /// Space above the code, so the first line clears the corner.
 const TOP_PADDING: f32 = 28.;
-
-/// Labels drawn this frame, by Code Block, in window coordinates.
-pub(crate) type LabelSink = Rc<RefCell<Vec<(BlockId, Bounds<Pixels>)>>>;
 
 /// Fence names that mean "no language", on purpose.
 const PLAIN_NAMES: [&str; 4] = ["text", "plain", "plaintext", "txt"];
@@ -80,7 +78,7 @@ pub(crate) struct CodeBox<'a> {
     pub(crate) flow: FlowPosition,
     pub(crate) node_cx: &'a RenderContext,
     /// Where the label's bounds are recorded this frame.
-    pub(crate) labels: &'a LabelSink,
+    pub(crate) labels: &'a BoundsSink,
 }
 
 pub(crate) fn render(code_box: CodeBox, window: &mut Window, cx: &mut App) -> AnyElement {
@@ -145,7 +143,6 @@ pub(crate) fn render(code_box: CodeBox, window: &mut Window, cx: &mut App) -> An
         _ => "Change language".to_string(),
     };
     let unknown = matches!(label, Label::Unknown(_));
-    let sink = sink.clone();
     let control = h_flex()
         .id(("code-language", id.as_u64() as usize))
         .role(Role::Button)
@@ -181,16 +178,7 @@ pub(crate) fn render(code_box: CodeBox, window: &mut Window, cx: &mut App) -> An
         })
         .child(label.text().to_string())
         .child(Icon::default().data(ICON_CHEVRON).xsmall())
-        .child(
-            canvas(
-                move |bounds, _, _| sink.borrow_mut().push((id, bounds)),
-                |_, _, _, _| {},
-            )
-            .absolute()
-            .top_0()
-            .left_0()
-            .size_full(),
-        );
+        .child(record_bounds(sink, id));
 
     div()
         .relative()
