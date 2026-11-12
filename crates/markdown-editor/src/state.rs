@@ -306,8 +306,13 @@ pub(crate) const COPY_TAG: &str = "gpui-kit/block-editor/inline-markdown/v1";
 /// back into blocks.
 pub(crate) const BLOCKS_COPY_TAG: &str = "gpui-kit/block-editor/blocks-markdown/v1";
 
+/// FORK: clipboard metadata for a copy from inside one Code Block. The
+/// plain text is the raw code; the tag carries the block's `lang` and `meta`
+/// (`<tag>\n<lang>\n<meta>`) so a paste back into sett can rebuild the block.
+pub(crate) const CODE_COPY_TAG: &str = "gpui-kit/block-editor/code/v1";
+
 /// What the clipboard item says about where it came from.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum CopyKind {
     /// Text from elsewhere: the conservative import.
     External,
@@ -315,22 +320,52 @@ pub(crate) enum CopyKind {
     Inline,
     /// The editor's own copy of whole or partial blocks: block Markdown.
     Blocks,
+    /// FORK: the editor's own copy from inside one Code Block: raw code, plus
+    /// the source block's language and meta.
+    Code {
+        lang: Option<SharedString>,
+        meta: Option<SharedString>,
+    },
 }
 
 impl CopyKind {
     fn of(item: &ClipboardItem) -> Self {
         match item.metadata() {
-            Some(m) if m == COPY_TAG => Self::Inline,
-            Some(m) if m == BLOCKS_COPY_TAG => Self::Blocks,
-            _ => Self::External,
+            Some(m) => Self::from_tag(m),
+            None => Self::External,
         }
     }
 
-    fn tag(self) -> Option<&'static str> {
+    pub(crate) fn from_tag(tag: &str) -> Self {
+        if tag == COPY_TAG {
+            return Self::Inline;
+        }
+        if tag == BLOCKS_COPY_TAG {
+            return Self::Blocks;
+        }
+        if let Some(rest) = tag.strip_prefix(CODE_COPY_TAG)
+            && let Some(rest) = rest.strip_prefix('\n')
+        {
+            let (lang, meta) = rest.split_once('\n').unwrap_or((rest, ""));
+            let some = |s: &str| (!s.is_empty()).then(|| SharedString::from(s.to_owned()));
+            return Self::Code {
+                lang: some(lang),
+                meta: some(meta),
+            };
+        }
+        Self::External
+    }
+
+    pub(crate) fn tag(&self) -> Option<String> {
         match self {
             Self::External => None,
-            Self::Inline => Some(COPY_TAG),
-            Self::Blocks => Some(BLOCKS_COPY_TAG),
+            Self::Inline => Some(COPY_TAG.to_string()),
+            Self::Blocks => Some(BLOCKS_COPY_TAG.to_string()),
+            Self::Code { lang, meta } => Some(format!(
+                "{CODE_COPY_TAG}\n{}\n{}",
+                lang.as_deref().unwrap_or_default(),
+                meta.as_deref().unwrap_or_default()
+            )),
         }
     }
 }
@@ -2271,58 +2306,10 @@ impl BlockEditorState {
         let _ = self.run(EditorCommand::ToggleMark(kind), cx);
     }
 
-    /// The selection as clipboard text, and whether it is the editor's own
-    /// inline Markdown (D17): then the copy is tagged with
-    /// [`COPY_TAG`] so paste parses it back.
+    /// The selection as clipboard text and what kind of copy it is; see
+    /// [`BlockEditorModel::copy_selection`].
     fn selected_text(&self) -> (String, CopyKind) {
-        if let Some(table) = self.model.cells_markdown() {
-            return (table, CopyKind::Blocks);
-        }
-        if let Some((parent, range)) = self.model.selected_blocks() {
-            let ids = &self.model.doc.children(parent)[range];
-            return (
-                super::serialize::join_blocks(&self.model.doc, ids),
-                CopyKind::Blocks,
-            );
-        }
-        let Ok(range) = self.model.doc.resolve_selection(self.model.selection()) else {
-            return (String::new(), CopyKind::External);
-        };
-        // Several blocks: Markdown for the whole selection (D18).
-        if range.start.block != range.end.block
-            && let Some(markdown) = super::slice::selection_markdown(&self.model.doc, range)
-        {
-            return (markdown, CopyKind::Blocks);
-        }
-        let mut inline_only = true;
-        let text = self
-            .model
-            .text_ranges(range)
-            .into_iter()
-            .filter_map(|(id, lo, hi)| {
-                // Marks and inline atoms copy as Markdown (an image as
-                // `![alt](url)`, never the U+FFFC placeholder, #3113). A
-                // partial selection serializes as its own inline, so
-                // delimiters are always balanced at the cut edges.
-                if let Some(inline) = self.model.doc.inline(id) {
-                    return Some(super::serialize::inline_copy_markdown(
-                        &inline.slice(lo..hi),
-                    ));
-                }
-                inline_only = false;
-                let text = self.model.doc.leaf_text(id)?;
-                text.get(lo..hi).map(str::to_string)
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        (
-            text,
-            if inline_only {
-                CopyKind::Inline
-            } else {
-                CopyKind::External
-            },
-        )
+        self.model.copy_selection()
     }
 
     // ---- action handlers --------------------------------------------------
@@ -2771,7 +2758,7 @@ impl BlockEditorState {
             return;
         }
         cx.write_to_clipboard(match kind.tag() {
-            Some(tag) => ClipboardItem::new_string_with_metadata(text, tag.to_string()),
+            Some(tag) => ClipboardItem::new_string_with_metadata(text, tag),
             None => ClipboardItem::new_string(text),
         });
     }
@@ -2857,25 +2844,14 @@ impl BlockEditorState {
         }
         self.pending_paste = None;
         if let Some(text) = text {
-            self.paste_text(text, request.plain, request.copy, cx);
+            self.paste_text(text, request.plain, request.copy.clone(), cx);
         }
         true
     }
     fn paste_text(&mut self, text: &str, plain: bool, copy: CopyKind, cx: &mut Context<Self>) {
         self.edit(
             EditOrigin::Paste,
-            |model| {
-                if !plain && copy == CopyKind::Blocks && model.paste_blocks_markdown(text)? {
-                    return Ok(());
-                }
-                if !plain && copy != CopyKind::External && model.paste_inline_markdown(text)? {
-                    return Ok(());
-                }
-                if !plain && model.paste_blocks(text)? {
-                    return Ok(());
-                }
-                model.insert_text(text, EditOrigin::Paste)
-            },
+            |model| model.paste_clipboard(text, plain, &copy),
             cx,
         );
     }

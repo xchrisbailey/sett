@@ -1,4 +1,5 @@
 mod chips;
+mod code_copy_paste;
 mod commands;
 mod host;
 mod projection;

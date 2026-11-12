@@ -45,6 +45,8 @@ extern crate gpui_kit as gpui;
 
 // FORK: drawing callouts, and the colour maths for their header text.
 mod callout;
+// FORK: copy and paste at a Code Block's edges.
+mod code_clipboard;
 mod color;
 // FORK: the Callout type menu.
 mod callout_menu;
