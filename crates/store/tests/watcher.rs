@@ -17,7 +17,14 @@ fn write(root: &Path, rel: &str, text: &str) {
 
 fn new_store() -> (tempfile::TempDir, Store) {
     let dir = tempfile::tempdir().unwrap();
-    let store = Store::open(dir.path().join("sett")).unwrap();
+    let mut store = Store::open(dir.path().join("sett")).unwrap();
+    store.set_trash(|path| {
+        if path.is_dir() {
+            fs::remove_dir_all(path)
+        } else {
+            fs::remove_file(path)
+        }
+    });
     (dir, store)
 }
 

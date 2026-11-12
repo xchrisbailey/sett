@@ -67,7 +67,9 @@ impl AppModel {
         settings_path: Option<PathBuf>,
         cx: &mut App,
     ) -> io::Result<Entity<AppModel>> {
-        AppModel::open_with(settings, settings_path, true, cx)
+        let model = AppModel::open_with(settings, settings_path, true, cx)?;
+        model.update(cx, |m, _| m.store.use_system_trash());
+        Ok(model)
     }
 
     /// Like [`AppModel::open`] but without watching the data root, for when

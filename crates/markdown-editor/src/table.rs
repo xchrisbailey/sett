@@ -223,6 +223,8 @@ impl BlockEditorModel {
         let table = DetachedBlock::container(
             BlockKindData::Table {
                 aligns: vec![ColumnAlign::default(); cols],
+                // FORK: a new table has no source delimiter row to keep, and
+                // neither does a table whose columns change below.
                 delimiter_row: None,
             },
             (0..rows).map(|_| empty_row(cols)).collect(),

@@ -133,7 +133,14 @@ impl Store {
         let store = Store {
             root: root.into(),
             log: WriteLog::default(),
-            trash: Arc::new(|path| trash::delete(path).map_err(io::Error::other)),
+            // Tests must never reach the real Trash, so it's opt-in: the app
+            // calls `use_system_trash`, and tests that trash call `set_trash`.
+            trash: Arc::new(|path| {
+                Err(io::Error::other(format!(
+                    "no Trash set for {}: call Store::use_system_trash or Store::set_trash",
+                    path.display()
+                )))
+            }),
         };
         if !store.root.exists() {
             store.first_run()?;
@@ -145,8 +152,14 @@ impl Store {
         &self.root
     }
 
-    /// Replaces how `trash_*` disposes of files, which by default moves them
-    /// to the macOS Trash. Tests use this to keep the real Trash untouched.
+    /// Makes `trash_*` move files to the macOS Trash. Until this or
+    /// [`Store::set_trash`] is called, trashing fails.
+    pub fn use_system_trash(&mut self) {
+        self.set_trash(|path| trash::delete(path).map_err(io::Error::other));
+    }
+
+    /// Replaces how `trash_*` disposes of files. Tests use this to keep the
+    /// real Trash untouched.
     pub fn set_trash(&mut self, trash: impl Fn(&Path) -> io::Result<()> + Send + Sync + 'static) {
         self.trash = Arc::new(trash);
     }

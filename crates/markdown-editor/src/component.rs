@@ -90,6 +90,7 @@ impl RenderOnce for BlockEditor {
     }
 }
 
+// FORK: gated like the other GPUI view tests (see FORK.md).
 #[cfg(all(test, feature = "view-tests"))]
 mod tests {
     use super::*;
