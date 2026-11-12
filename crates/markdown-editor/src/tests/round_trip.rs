@@ -695,8 +695,7 @@ fn quotes_that_are_not_callouts_stay_plain_quotes() {
         assert_eq!(callout_of(&editor, 0), None, "{source}");
         assert_eq!(editor.source(), source);
     }
-    // An escaped marker is literal text. (Saving drops the escape, a known
-    // normalisation of the `[!X]` writer in `markdown_source.rs`.)
+    // An escaped marker is literal text.
     assert_eq!(callout_of(&model("> \\[!NOTE]\n> Body"), 0), None);
 }
 
@@ -726,5 +725,18 @@ fn callout_starting_with_an_empty_list_item_keeps_the_blank_line() {
             "{source} saved as {saved:?}"
         );
         assert_eq!(reloaded.source(), saved);
+    }
+}
+
+#[test]
+fn escaped_callout_marker_stays_escaped_on_save() {
+    for source in [
+        "> \\[!NOTE]\n> Body",
+        "> \\[!NOTE]",
+        "> \\[!note]",
+        "> \\[!WARNING]\n>\n> Body",
+    ] {
+        assert_eq!(model(source).source(), source);
+        assert_eq!(callout_of(&model(source), 0), None, "{source:?}");
     }
 }

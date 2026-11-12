@@ -9,6 +9,7 @@ use super::{
     inline::{InlineAtom, InlineText},
     kind::BlockKindData,
 };
+use crate::kind::CalloutKind;
 use crate::markdown_source::{
     MarkdownSource, MarkdownSourceOptions, markdown_destination, markdown_title,
 };
@@ -64,7 +65,7 @@ fn block(doc: &EditorDocument, id: BlockId) -> String {
             // FORK: a Callout writes its marker line, then its contents
             // straight after it. An empty one is just the marker.
             let Some(callout) = callout else {
-                return quote_lines(&body);
+                return quote_lines(&escape_callout_marker(doc, id, body));
             };
             let marker = format!("[!{}]", callout.marker);
             if body.trim_matches(['\n', '\r']).is_empty() {
@@ -221,6 +222,26 @@ fn quote_lines(text: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// FORK: `body` of the plain quote `id`, with a leading `[!TYPE]` marker
+/// escaped where it would read back as a Callout. Its text came from an
+/// escaped `\[!NOTE]`, and the literal writer keeps `[!X]` bare.
+fn escape_callout_marker(doc: &EditorDocument, id: BlockId, body: String) -> String {
+    let top_level = doc
+        .parent(id)
+        .is_some_and(|parent| matches!(doc.kind(parent), Some(BlockKindData::Root)));
+    let first_line = body.lines().next().unwrap_or_default();
+    let is_marker = first_line
+        .trim_end_matches([' ', '\t'])
+        .strip_prefix("[!")
+        .and_then(|rest| rest.strip_suffix(']'))
+        .is_some_and(|marker| CalloutKind::from_marker(marker).is_some());
+    if top_level && is_marker {
+        format!("\\{body}")
+    } else {
+        body
+    }
 }
 
 /// FORK: whether `first` can start on the line after a Callout's marker.
