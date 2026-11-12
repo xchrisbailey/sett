@@ -95,11 +95,6 @@ impl BlockEditorModel {
             return self.insert_text(text, EditOrigin::Paste);
         }
         let in_code = self.code_block_at_selection();
-        if let Some((lang, meta)) = &in_code
-            && let Some(fenced) = self.single_fence(text)
-        {
-            return self.paste_fenced_into_code(fenced, lang.is_none(), meta.is_none());
-        }
         if let CopyKind::Code { lang, meta } = copy {
             // One line is text, and a Code Block takes its code raw. Several
             // lines outside a Code Block become one, placed like any pasted
@@ -111,6 +106,11 @@ impl BlockEditorModel {
                 }
             }
             return self.insert_text(text, EditOrigin::Paste);
+        }
+        if let Some((lang, meta)) = &in_code
+            && let Some(fenced) = self.single_fence(text)
+        {
+            return self.paste_fenced_into_code(fenced, lang.is_none(), meta.is_none());
         }
         if *copy == CopyKind::Blocks && self.paste_blocks_markdown(text)? {
             return Ok(());

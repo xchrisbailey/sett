@@ -130,6 +130,22 @@ fn fenced_paste_into_a_code_block_drops_the_fences_and_keeps_its_language() {
 }
 
 #[test]
+fn a_code_copy_that_looks_like_a_fence_pastes_raw_into_a_code_block() {
+    let kind = CopyKind::Code {
+        lang: None,
+        meta: None,
+    };
+    let text = "```js\nlet a;\n```";
+    let mut m = model("```python\n```");
+    caret_in(&mut m, 0, 0);
+    paste(&mut m, text, false, &kind);
+    assert_eq!(
+        m.source().trim_end(),
+        crate::serialize::fenced_code(Some("python"), None, text)
+    );
+}
+
+#[test]
 fn tilde_fence_paste_is_stripped_too() {
     let mut m = model("```python\n```");
     caret_in(&mut m, 0, 0);
