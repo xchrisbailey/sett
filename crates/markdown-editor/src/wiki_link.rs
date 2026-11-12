@@ -98,15 +98,21 @@ impl MarkdownPlugin for WikiChipPlugin {
         cx: &mut App,
     ) -> Option<InlineElement> {
         let data = node.data::<ChipData>()?;
-        let directory = self.directory.read().ok()?.clone();
+        let directory = self
+            .directory
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
         let parts = link_parts(&data.inner);
         let info = directory.get(parts.slug);
-        let followable = self
+        let followable = *self
             .hover
             .read()
-            .ok()
-            .is_some_and(|hover| *hover == Some(data.key));
-        Some(InlineElement::new(chip(&parts, info, followable, cx)))
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            == Some(data.key);
+        Some(InlineElement::new(chip(
+            &parts, info, followable, data.key, cx,
+        )))
     }
 }
 
@@ -118,16 +124,36 @@ fn missing_item_tip(slug: &str) -> String {
 /// The widest a chip grows; a longer title ends in an ellipsis.
 const MAX_WIDTH_REMS: f32 = 20.;
 
+/// How the chip words a Link that resolves.
+enum Shape<'a> {
+    Label(&'a str),
+    Heading(&'a str),
+    Plain,
+}
+
 /// `hovered`: Cmd/Ctrl is held with the pointer over this chip. A working
-/// chip darkens and underlines; a broken one gets a tooltip.
-fn chip(parts: &LinkParts<'_>, info: Option<&WikiLinkInfo>, hovered: bool, cx: &App) -> AnyElement {
+/// chip darkens and underlines; a broken one gets a tooltip. `key` makes the
+/// element id unique to this chip, even when another has the same slug.
+fn chip(
+    parts: &LinkParts<'_>,
+    info: Option<&WikiLinkInfo>,
+    hovered: bool,
+    key: ChipKey,
+    cx: &App,
+) -> AnyElement {
     let theme = cx.theme();
     let working = info.filter(|info| info.state != WikiLinkState::Broken);
-    let shown = match (working, parts.label, parts.heading) {
-        (None, label, _) => label.unwrap_or(parts.slug).to_string(),
-        (Some(_), Some(label), _) => label.to_string(),
-        (Some(info), None, Some(heading)) => format!("{} \u{203A} {heading}", info.title),
-        (Some(info), None, None) => info.title.to_string(),
+    let shape = match (parts.label, parts.heading) {
+        (Some(label), _) => Shape::Label(label),
+        (None, Some(heading)) => Shape::Heading(heading),
+        (None, None) => Shape::Plain,
+    };
+    let shown = match (working, &shape) {
+        // A broken Link shows its slug, whatever its label says.
+        (None, _) => parts.slug.to_string(),
+        (Some(_), Shape::Label(label)) => label.to_string(),
+        (Some(info), Shape::Heading(heading)) => format!("{} \u{203A} {heading}", info.title),
+        (Some(info), Shape::Plain) => info.title.to_string(),
     };
     let name = match working {
         None => format!("{shown} (not found)"),
@@ -135,11 +161,7 @@ fn chip(parts: &LinkParts<'_>, info: Option<&WikiLinkInfo>, hovered: bool, cx: &
         Some(_) => shown,
     };
     let base = h_flex()
-        .id(("wiki-chip", {
-            let mut hasher = std::hash::DefaultHasher::new();
-            std::hash::Hash::hash(parts.slug, &mut hasher);
-            std::hash::Hasher::finish(&hasher) as usize
-        }))
+        .id(key.element_id())
         .role(Role::Link)
         .aria_label(name)
         .test_support()
@@ -158,8 +180,8 @@ fn chip(parts: &LinkParts<'_>, info: Option<&WikiLinkInfo>, hovered: bool, cx: &
             .child(text)
     };
     let Some(info) = working else {
-        // A broken Link keeps its slug (or label) in a dashed outline.
-        let text = parts.label.unwrap_or(parts.slug).to_string();
+        // A broken Link keeps its slug in a dashed outline.
+        let text = parts.slug.to_string();
         let tip = missing_item_tip(parts.slug);
         return base
             .when(hovered, |chip| {
@@ -176,13 +198,13 @@ fn chip(parts: &LinkParts<'_>, info: Option<&WikiLinkInfo>, hovered: bool, cx: &
         .when(hovered, |chip| chip.underline())
         .text_color(theme.link)
         .child(Icon::default().data(ICON_LINK).xsmall());
-    chip = match (parts.label, parts.heading) {
-        (Some(label), _) => chip.child(truncated(label.to_string().into())),
-        (None, Some(heading)) => chip
+    chip = match shape {
+        Shape::Label(label) => chip.child(truncated(label.to_string().into())),
+        Shape::Heading(heading) => chip
             .child(truncated(info.title.clone()))
             .child(div().text_color(theme.muted_foreground).child("\u{203A}"))
             .child(truncated(heading.to_string().into()).text_color(theme.muted_foreground)),
-        (None, None) => chip.child(truncated(info.title.clone())),
+        Shape::Plain => chip.child(truncated(info.title.clone())),
     };
     if info.state == WikiLinkState::Ambiguous {
         chip = chip.child(

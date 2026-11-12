@@ -123,6 +123,13 @@ fn a_broken_and_an_ambiguous_link_show_their_state(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn a_broken_link_shows_its_slug_not_its_label(cx: &mut TestAppContext) {
+    let (f, _) = open_plan(cx, "See [[nowhere|spend]]\n");
+    assert!(has_label(cx, &f, "nowhere (not found)"));
+    assert!(!has_label(cx, &f, "spend (not found)"));
+}
+
+#[gpui_kit::test]
 fn a_new_title_elsewhere_redraws_the_chip(cx: &mut TestAppContext) {
     let (f, _) = open_plan(cx, "See [[budget]]\n");
     assert!(has_label(cx, &f, "Budget plan"));

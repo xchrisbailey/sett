@@ -78,8 +78,27 @@ pub(crate) struct ChipData {
     pub(crate) key: ChipKey,
 }
 
-/// A chip's leaf (`BlockId::as_u64`) and the start of its span in the model.
-pub(crate) type ChipKey = (u64, usize);
+/// Names one chip: its leaf and the start of its span in the model.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ChipKey {
+    /// `BlockId::as_u64` of the leaf.
+    pub(crate) leaf: u64,
+    pub(crate) start: usize,
+}
+
+impl ChipKey {
+    pub(crate) fn new(leaf: BlockId, start: usize) -> Self {
+        Self {
+            leaf: leaf.as_u64(),
+            start,
+        }
+    }
+
+    /// An element id no other chip shares, even one with the same slug.
+    pub(crate) fn element_id(self) -> SharedString {
+        format!("wiki-chip-{}-{}", self.leaf, self.start).into()
+    }
+}
 
 /// The name of the chip's inline plugin.
 pub(crate) const CHIP_NODE: &str = "sett-wiki-chip";

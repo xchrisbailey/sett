@@ -1703,13 +1703,13 @@ impl BlockEditorState {
         let chip = secondary.then(|| self.wiki_chip_at(at)).flatten();
         let chip_key = chip
             .as_ref()
-            .map(|chip| (chip.block.as_u64(), chip.span.start));
+            .map(|chip| super::wiki_chip::ChipKey::new(chip.block, chip.span.start));
         let followable = chip.as_ref().is_some_and(|chip| {
             self.wiki_links
                 .read()
-                .ok()
-                .and_then(|dir| dir.get(&chip.slug).map(|info| info.state))
-                .is_some_and(|state| state != WikiLinkState::Broken)
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .get(&chip.slug)
+                .is_some_and(|info| info.state != WikiLinkState::Broken)
         });
         {
             let mut hover = self

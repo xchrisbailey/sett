@@ -152,3 +152,20 @@ fn a_heading_is_found_by_its_text_ignoring_case() {
     assert_eq!(crate::wiki_chip::heading_position(doc, "Quote"), None);
     assert_eq!(crate::wiki_chip::heading_position(doc, "intro"), None);
 }
+
+#[test]
+fn two_chips_for_one_slug_get_different_element_ids() {
+    use crate::wiki_chip::ChipKey;
+    let m = model("[[a]] and [[a]]\n\n[[a]]");
+    let [first, second] = [0, 1].map(|ix| m.doc.leaves()[ix]);
+    let ids = [
+        ChipKey::new(first, 0),
+        ChipKey::new(first, 10),
+        ChipKey::new(second, 0),
+    ]
+    .map(ChipKey::element_id);
+    assert_eq!(
+        ids.iter().collect::<std::collections::HashSet<_>>().len(),
+        3
+    );
+}
