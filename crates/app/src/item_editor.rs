@@ -315,6 +315,7 @@ impl ItemEditor {
         let Some(item) = self.item.clone() else {
             return;
         };
+        self.refresh_link_candidates(cx);
         let model = self.model.read(cx);
         if model.space() != item.space() {
             self.flush(window, cx);
@@ -406,12 +407,24 @@ impl ItemEditor {
         self.block
             .update(cx, |block, cx| block.set_readonly(locked, cx));
         self.load_body(window, cx);
+        self.refresh_link_candidates(cx);
         self.seen = seen;
         self.base = Some(base);
         self.dirty = false;
         self.asking = false;
         self.autosave = None;
         cx.notify();
+    }
+
+    /// Gives the Link Picker the Space's Items, minus the open one.
+    fn refresh_link_candidates(&self, cx: &mut Context<Self>) {
+        let Some(item) = &self.item else {
+            return;
+        };
+        let candidates =
+            crate::link_candidates::link_candidates(self.model.read(cx).index(), &item.id());
+        self.block
+            .update(cx, |block, _| block.set_link_candidates(candidates));
     }
 
     fn set_mode(&mut self, mode: EditorMode, window: &mut Window, cx: &mut Context<Self>) {

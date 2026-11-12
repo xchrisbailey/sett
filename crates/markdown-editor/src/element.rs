@@ -421,6 +421,10 @@ impl RenderOnce for BlockEditor {
             .on_action(window.listener_for(s, BlockEditorState::on_callout_menu_down))
             .on_action(window.listener_for(s, BlockEditorState::on_callout_menu_pick))
             .on_action(window.listener_for(s, BlockEditorState::on_callout_menu_close))
+            .on_action(window.listener_for(s, BlockEditorState::on_link_picker_up))
+            .on_action(window.listener_for(s, BlockEditorState::on_link_picker_down))
+            .on_action(window.listener_for(s, BlockEditorState::on_link_picker_pick))
+            .on_action(window.listener_for(s, BlockEditorState::on_link_picker_close))
             .on_action(window.listener_for(s, BlockEditorState::on_toggle_bold))
             .on_action(window.listener_for(s, BlockEditorState::on_toggle_toolbar))
             .on_action(window.listener_for(s, BlockEditorState::on_toggle_italic))
@@ -437,6 +441,7 @@ impl RenderOnce for BlockEditor {
             // FORK: the Insert Menu and Callout type menu popovers.
             .children(super::insert_menu::render(&self.state, cx))
             .children(super::callout_menu::render(&self.state, cx))
+            .children(super::link_picker::render(&self.state, cx))
             .child(EditorRoot {
                 state: self.state.clone(),
                 child: Some(

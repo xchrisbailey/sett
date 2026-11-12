@@ -86,6 +86,11 @@ actions!(
         CalloutMenuDown,
         CalloutMenuPick,
         CalloutMenuClose,
+        // FORK: the Link Picker.
+        LinkPickerUp,
+        LinkPickerDown,
+        LinkPickerPick,
+        LinkPickerClose,
         Indent,
         Outdent,
         Copy,
@@ -267,6 +272,16 @@ pub(crate) fn init(cx: &mut App) {
             CalloutMenuClose,
             Some("BlockEditor && callout_menu"),
         ),
+        // FORK: the Link Picker's keys, likewise.
+        KeyBinding::new("up", LinkPickerUp, Some("BlockEditor && link_picker")),
+        KeyBinding::new("down", LinkPickerDown, Some("BlockEditor && link_picker")),
+        KeyBinding::new("enter", LinkPickerPick, Some("BlockEditor && link_picker")),
+        KeyBinding::new("tab", LinkPickerPick, Some("BlockEditor && link_picker")),
+        KeyBinding::new(
+            "escape",
+            LinkPickerClose,
+            Some("BlockEditor && link_picker"),
+        ),
     ]);
 }
 
@@ -444,6 +459,11 @@ pub struct BlockEditorState {
     pub(crate) insert_menu_options: Vec<super::insert_menu::InsertMenuOption>,
     /// FORK: the open Callout type menu.
     pub(crate) callout_menu: Option<super::menu::OpenMenu>,
+    /// FORK: the open Link Picker, what it is matching, and its candidates.
+    pub(crate) link_picker: Option<super::menu::OpenMenu>,
+    pub(crate) link_query: super::link_picker::LinkQuery,
+    pub(crate) link_candidates: std::sync::Arc<[super::link_picker::LinkCandidate]>,
+    pub(crate) link_scroll: gpui::ScrollHandle,
     /// The table grips the pointer shows (to repaint on change).
     pub(crate) table_hover: Vec<(BlockId, crate::TableLine)>,
     /// The pointer is on a table grip (grab cursor).
@@ -478,6 +498,7 @@ impl BlockEditorState {
                 // FORK: blur closes the menus.
                 this.insert_menu = None;
                 this.callout_menu = None;
+                this.link_picker = None;
                 cx.emit(BlockEditorEvent::Blur);
             }),
             cx.observe_window_activation(window, |this, window, cx| {
@@ -520,6 +541,10 @@ impl BlockEditorState {
             insert_menu: None,
             insert_menu_options: super::insert_menu::InsertMenuOption::defaults(),
             callout_menu: None,
+            link_picker: None,
+            link_query: Default::default(),
+            link_candidates: Vec::new().into(),
+            link_scroll: gpui::ScrollHandle::new(),
             table_hover: Vec::new(),
             grip_hover: false,
             _subscriptions: subscriptions,
@@ -550,6 +575,9 @@ impl BlockEditorState {
         }
         if self.callout_menu.is_some() {
             context.push_str(" callout_menu");
+        }
+        if self.link_picker.is_some() {
+            context.push_str(" link_picker");
         }
         context
     }
@@ -962,6 +990,7 @@ impl BlockEditorState {
         // FORK: refilter or close the Insert Menu. The type menu is for the
         // document as it was when it opened, so it closes.
         self.sync_insert_menu();
+        self.sync_link_picker(true);
         self.callout_menu = None;
         self.goal_x = None;
         self.reveal.set(true);
@@ -978,6 +1007,7 @@ impl BlockEditorState {
         // FORK: a caret move closes the type menu, and the Insert Menu once
         // the caret leaves its paragraph.
         self.sync_insert_menu();
+        self.sync_link_picker(false);
         self.callout_menu = None;
         self.reveal.set(true);
         self.pause_blink(cx);
@@ -1018,6 +1048,7 @@ impl BlockEditorState {
         // FORK: the Insert Menu held still while composing; the committed
         // (or cancelled) text filters it now.
         self.sync_insert_menu();
+        self.sync_link_picker(true);
     }
 
     /// Whether an IME undo group is open (tests: it must never leak).
@@ -2978,6 +3009,9 @@ impl EntityInputHandler for BlockEditorState {
         // FORK: a typed `/` may open the Insert Menu.
         if text == "/" && !composing {
             self.maybe_open_insert_menu(cx);
+        } else if text.ends_with('[') && !composing {
+            // FORK: a typed `[[` may open the Link Picker.
+            self.maybe_open_link_picker(cx);
         } else if text == " " {
             self.apply_input_rule(cx);
         } else if text.ends_with(['`', '*', '~']) && self.rule_on(RuleKind::InlineMarks) {
