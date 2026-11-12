@@ -174,7 +174,9 @@ impl RenderOnce for BlockEditor {
         };
         let mut children: Vec<AnyElement> = Vec::new();
         // FORK: callout header bounds, filled at prepaint (`callout.rs`).
-        let callout_headers = super::callout::HeaderSink::default();
+        let callout_headers = super::frame::BoundsSink::default();
+        // FORK: code language label bounds (`code_label.rs`).
+        let code_labels = super::frame::BoundsSink::default();
         {
             let mut cull_state = cull.borrow_mut();
             cull_state.measured.clear();
@@ -326,6 +328,19 @@ impl RenderOnce for BlockEditor {
                             cx,
                         )
                     }
+                    // FORK: a Code Block gets our language label (#66).
+                    (None, BlockNode::CodeBlock(_)) => super::code_label::render(
+                        super::code_label::CodeBox {
+                            node,
+                            id: unit.id,
+                            ix: node_ix,
+                            flow: flow.last(is_last_node),
+                            node_cx: &node_cx,
+                            labels: &code_labels,
+                        },
+                        window,
+                        cx,
+                    ),
                     _ => node.render(node_ix, flow.last(is_last_node), &node_cx, window, cx),
                 };
                 // Per-block accessibility node around the rendered block.
@@ -451,6 +466,11 @@ impl RenderOnce for BlockEditor {
             .on_action(window.listener_for(s, BlockEditorState::on_callout_menu_down))
             .on_action(window.listener_for(s, BlockEditorState::on_callout_menu_pick))
             .on_action(window.listener_for(s, BlockEditorState::on_callout_menu_close))
+            .on_action(window.listener_for(s, BlockEditorState::on_open_language_menu))
+            .on_action(window.listener_for(s, BlockEditorState::on_language_menu_up))
+            .on_action(window.listener_for(s, BlockEditorState::on_language_menu_down))
+            .on_action(window.listener_for(s, BlockEditorState::on_language_menu_pick))
+            .on_action(window.listener_for(s, BlockEditorState::on_language_menu_close))
             .on_action(window.listener_for(s, BlockEditorState::on_follow_wiki_link))
             .on_action(window.listener_for(s, BlockEditorState::on_link_picker_up))
             .on_action(window.listener_for(s, BlockEditorState::on_link_picker_down))
@@ -472,6 +492,7 @@ impl RenderOnce for BlockEditor {
             // FORK: the Insert Menu and Callout type menu popovers.
             .children(super::insert_menu::render(&self.state, cx))
             .children(super::callout_menu::render(&self.state, cx))
+            .children(super::language_menu::render(&self.state, cx))
             .children(super::link_picker::render(&self.state, cx))
             .child(EditorRoot {
                 state: self.state.clone(),
@@ -496,6 +517,7 @@ impl RenderOnce for BlockEditor {
                 content_bounds,
                 // FORK
                 callout_headers,
+                code_labels,
                 padding: root_style.padding,
                 typography,
                 caret_was_visible,
@@ -516,7 +538,9 @@ struct EditorRoot {
     style: BlockEditorStyle,
     content_bounds: Rc<Cell<Bounds<Pixels>>>,
     /// FORK: where callout headers record their bounds this frame.
-    callout_headers: super::callout::HeaderSink,
+    callout_headers: super::frame::BoundsSink,
+    /// FORK: where code language labels record their bounds this frame.
+    code_labels: super::frame::BoundsSink,
     padding: Edges<DefiniteLength>,
     typography: TextStyle,
     caret_was_visible: bool,
@@ -614,6 +638,7 @@ impl Element for EditorRoot {
         if let Some(backgrounds) = self.backgrounds.take() {
             // FORK: collect this frame's callout headers.
             self.callout_headers.borrow_mut().clear();
+            self.code_labels.borrow_mut().clear();
             let (_, geometries) = collect_leaf_geometry(backgrounds, || child.prepaint(window, cx));
             // Swap in the complete frame; handlers read it until the next one.
             let mut frame = super::frame::into_frame(
@@ -624,6 +649,7 @@ impl Element for EditorRoot {
             frame.content = Some(self.content_bounds.get());
             // FORK
             frame.callout_headers = self.callout_headers.take();
+            frame.code_labels = self.code_labels.take();
             {
                 let state = self.state.read(cx);
                 let doc = &state.model.doc;
@@ -880,6 +906,16 @@ impl Element for EditorRoot {
                 && entity.update(cx, |state, cx| {
                     state.click_callout_header(event.position, cx)
                 })
+            {
+                let focus = entity.read(cx).focus_handle.clone();
+                window.focus(&focus, cx);
+                cx.stop_propagation();
+                return;
+            }
+            // FORK: a Code Block's language label takes the click, opens the
+            // Language Menu and leaves the caret where it is.
+            if !event.modifiers.shift
+                && entity.update(cx, |state, cx| state.click_code_label(event.position, cx))
             {
                 let focus = entity.read(cx).focus_handle.clone();
                 window.focus(&focus, cx);

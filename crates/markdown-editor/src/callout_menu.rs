@@ -3,7 +3,7 @@
 //! under the header. Picking one retypes the callout as one undo step. The
 //! editor keeps focus and the caret never moves, on pick or on close.
 
-use gpui::{Bounds, Context, Pixels, Point};
+use gpui::{Context, Pixels, Point};
 
 use super::{
     id::BlockId,
@@ -11,7 +11,6 @@ use super::{
     kind::CalloutKind,
     menu::{self, MenuSlot, OpenMenu},
     state::BlockEditorState,
-    transaction::EditOrigin,
 };
 
 /// The menu's options in order: the five types, then a plain quote.
@@ -43,12 +42,9 @@ impl BlockEditorState {
         let Some(kind) = self.callout_kind(block) else {
             return;
         };
-        if self.readonly {
+        if !self.begin_menu_open(cx) {
             return;
         }
-        self.end_composition();
-        self.insert_menu = None;
-        self.close_table_menu(cx);
         let highlighted = CALLOUT_TYPES
             .iter()
             .position(|option| *option == Some(kind))
@@ -64,48 +60,18 @@ impl BlockEditorState {
         at: Point<Pixels>,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(block) = self.callout_header_at(at) else {
-            return false;
-        };
-        self.open_callout_menu(block, cx);
-        true
+        self.click_menu_anchor(MenuSlot::Callout, at, cx)
     }
 
     /// The shortcut: open the menu for the callout holding the caret.
-    /// Elsewhere the key passes on. A header that wasn't drawn in view last
-    /// frame (scrolled away, or not laid out yet) opens nothing, since the
-    /// menu would hang from somewhere the user can't see.
     pub(crate) fn on_open_callout_menu(
         &mut self,
         _: &super::state::OpenCalloutMenu,
         _: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) {
-        match self.model.caret_callout() {
-            Some(block) if !self.readonly => {
-                if self.callout_header_in_view(block) {
-                    self.open_callout_menu(block, cx);
-                }
-            }
-            _ => cx.propagate(),
-        }
-    }
-
-    /// The callout `block`'s header bounds in the last painted frame.
-    fn callout_header_bounds(&self, block: BlockId) -> Option<Bounds<Pixels>> {
-        let frame = self.frame.borrow();
-        let (_, bounds) = frame.callout_headers.iter().find(|(id, _)| *id == block)?;
-        Some(*bounds)
-    }
-
-    /// Whether `block`'s header was drawn last frame inside the scrolled
-    /// viewport (anywhere, with no scroll container).
-    fn callout_header_in_view(&self, block: BlockId) -> bool {
-        self.callout_header_bounds(block).is_some_and(|header| {
-            self.scroll_handle
-                .as_ref()
-                .is_none_or(|scroll| scroll.bounds().intersects(&header))
-        })
+        let block = self.model.caret_callout();
+        self.open_menu_by_shortcut(MenuSlot::Callout, block, cx);
     }
 
     /// Move the highlight down (`forward`) or up, wrapping at the ends.
@@ -119,29 +85,13 @@ impl BlockEditorState {
         let Some(&kind) = CALLOUT_TYPES.get(ix) else {
             return;
         };
-        let Some(menu) = self.callout_menu.take() else {
-            return;
-        };
-        cx.notify();
-        if self.callout_kind(menu.block) == kind {
-            return;
-        }
-        self.model.break_coalescing();
-        let retyped = self.model.retype_quote(menu.block, kind);
-        self.model.break_coalescing();
-        // Any edit closes the menu, so `menu.block` is still the quote it
-        // opened on and this can't fail. If it ever did, the document is
-        // unchanged and there is nothing to report.
-        if retyped.unwrap_or(false) {
-            self.after_edit(EditOrigin::Command("set_callout"), cx);
-        }
-    }
-
-    /// Where the open menu hangs from: under its callout's header, in
-    /// window coordinates, from the last painted frame.
-    pub(crate) fn callout_menu_anchor(&self) -> Option<Point<Pixels>> {
-        let bounds = self.callout_header_bounds(self.callout_menu.as_ref()?.block)?;
-        Some(menu::below(bounds))
+        self.pick_anchored(
+            MenuSlot::Callout,
+            |this, block| this.callout_kind(block) == kind,
+            "set_callout",
+            |model, block| model.retype_quote(block, kind).unwrap_or(false),
+            cx,
+        );
     }
 }
 
@@ -150,16 +100,14 @@ pub(crate) fn render(
     state: &gpui::Entity<BlockEditorState>,
     cx: &gpui::App,
 ) -> Option<gpui::AnyElement> {
-    use gpui::prelude::FluentBuilder as _;
-    use gpui::{IntoElement as _, ParentElement as _, Styled as _, div};
+    use gpui::{IntoElement as _, Styled as _, div};
     use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _};
 
-    const ICON_CHECK: &[u8] = include_bytes!("../assets/icons/check.svg");
     const ICON_QUOTE: &[u8] = include_bytes!("../assets/icons/text-quote.svg");
 
     let s = state.read(cx);
     let menu = s.callout_menu.as_ref()?;
-    let at = s.callout_menu_anchor()?;
+    let at = s.anchor_below(MenuSlot::Callout, menu.block)?;
     let current = s.callout_kind(menu.block);
     let highlighted = menu.highlighted;
     let theme = cx.theme();
@@ -181,20 +129,19 @@ pub(crate) fn render(
                     .text_color(theme.muted_foreground),
             ),
         };
-        let fg = menu::option_color(on, cx);
-        menu::option_row(state, MenuSlot::Callout, ix, label, on, cx)
-            .child(icon)
-            .child(div().flex_1().child(label))
-            // A fixed slot keeps the names aligned whether or not they are
-            // checked.
-            .child(
-                div()
-                    .size_4()
-                    .when(kind.is_some() && kind == current, |this| {
-                        this.child(Icon::default().data(ICON_CHECK).small().text_color(fg))
-                    }),
-            )
-            .into_any_element()
+        menu::checked_option(
+            state,
+            menu::CheckedOption {
+                slot: MenuSlot::Callout,
+                ix,
+                name: label.into(),
+                label: label.into(),
+                leading: Some(icon.into_any_element()),
+                on,
+                ticked: kind.is_some() && kind == current,
+            },
+            cx,
+        )
     };
     let (types, plain) = CALLOUT_TYPES.split_at(CALLOUT_TYPES.len() - 1);
     let mut options: Vec<_> = types

@@ -118,21 +118,7 @@ fn block(doc: &EditorDocument, id: BlockId) -> String {
         }
         (BlockKindData::ListItem { .. }, _) => list_item(doc, id, "- "),
         (BlockKindData::CodeBlock { lang, meta }, BlockContent::Plain(code)) => {
-            // The final line ending below terminates the fence body. All
-            // line endings already in `code` are semantic content.
-            let mut info = lang.as_deref().unwrap_or_default().to_owned();
-            if let Some(meta) = meta {
-                info.push(' ');
-                info.push_str(meta);
-            }
-            let delimiter = if info.contains('`') { '~' } else { '`' };
-            let longest = code
-                .split(|c| c != delimiter)
-                .map(str::len)
-                .max()
-                .unwrap_or(0);
-            let fence = delimiter.to_string().repeat(longest.max(2) + 1);
-            format!("{fence}{info}\n{code}\n{fence}")
+            fenced_code(lang.as_deref(), meta.as_deref(), code)
         }
         (
             BlockKindData::Table {
@@ -445,4 +431,27 @@ fn custom_markdown(node: &gpui_kit::base::text::MarkdownNode) -> String {
     } else {
         node.as_markdown().to_string()
     }
+}
+
+// FORK: pulled out of the Code Block arm of `block` so a code-tagged
+// paste (`code_clipboard.rs`) builds the same fence.
+/// A fenced code block as Markdown. The fence is longer than any run of its
+/// delimiter inside the code, and uses `~` when the info string has a
+/// backtick.
+pub(crate) fn fenced_code(lang: Option<&str>, meta: Option<&str>, code: &str) -> String {
+    // The final line ending below terminates the fence body. All
+    // line endings already in `code` are semantic content.
+    let mut info = lang.unwrap_or_default().to_owned();
+    if let Some(meta) = meta {
+        info.push(' ');
+        info.push_str(meta);
+    }
+    let delimiter = if info.contains('`') { '~' } else { '`' };
+    let longest = code
+        .split(|c| c != delimiter)
+        .map(str::len)
+        .max()
+        .unwrap_or(0);
+    let fence = delimiter.to_string().repeat(longest.max(2) + 1);
+    format!("{fence}{info}\n{code}\n{fence}")
 }

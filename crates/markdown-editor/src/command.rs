@@ -759,7 +759,11 @@ impl BlockEditorModel {
                     (text, index)
                 }
                 Some(BlockKindData::CodeBlock { meta: old_meta, .. }) => {
-                    let meta = meta.or_else(|| old_meta.clone());
+                    // FORK: the meta belongs to the language, so clearing the
+                    // language drops it too.
+                    let meta = lang
+                        .as_ref()
+                        .and_then(|_| meta.or_else(|| old_meta.clone()));
                     tx.set_kind(pos.block, BlockKindData::CodeBlock { lang, meta })?;
                     return Ok(caret(pos));
                 }
@@ -773,6 +777,26 @@ impl BlockEditorModel {
             let id = code.id;
             tx.insert(parent, at, vec![code])?;
             Ok(caret(BlockPosition::new(id, offset)))
+        })
+    }
+
+    /// FORK: set (or with `None` clear) the language of the Code Block
+    /// `block`, wherever the caret is, leaving the selection alone. Changing
+    /// the language keeps the meta; clearing it drops the meta too.
+    pub(crate) fn set_code_lang(
+        &mut self,
+        block: BlockId,
+        lang: Option<String>,
+    ) -> Result<bool, CommandError> {
+        let Some(BlockKindData::CodeBlock { meta, .. }) = self.doc.kind(block) else {
+            return Err(CommandError::Unsupported("code block here"));
+        };
+        let lang = lang.filter(|l| !l.is_empty()).map(SharedString::from);
+        let meta = lang.as_ref().and_then(|_| meta.clone());
+        let selection = self.selection.clone();
+        self.transact(EditOrigin::Command("set_code_lang"), |tx| {
+            tx.set_kind(block, BlockKindData::CodeBlock { lang, meta })?;
+            Ok(Some(selection))
         })
     }
 

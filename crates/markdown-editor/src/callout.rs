@@ -7,12 +7,9 @@
 //! quote's children are rendered with `BlockNode::render`, as gpui-kit's
 //! Surface arm does, so caret, selection and clicks work as anywhere else.
 
-use std::{cell::RefCell, rc::Rc};
-
 use gpui::{
-    AnyElement, App, Bounds, FontWeight, Hsla, InteractiveElement as _, IntoElement,
-    ParentElement as _, Pixels, Role, StatefulInteractiveElement as _, Styled as _, Window, canvas,
-    div, px, rems,
+    AnyElement, App, FontWeight, Hsla, InteractiveElement as _, IntoElement, ParentElement as _,
+    Role, StatefulInteractiveElement as _, Styled as _, Window, div, px, rems,
 };
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::base::text::editor_host::{BlockNode, FlowPosition, RenderContext};
@@ -20,6 +17,7 @@ use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, h_flex, tooltip:
 
 use crate::{
     color::{over, readable},
+    frame::{BoundsSink, record_bounds},
     id::BlockId,
     kind::CalloutKind,
 };
@@ -32,10 +30,6 @@ const ICON_IMPORTANT: &[u8] = include_bytes!("../assets/icons/message-square-war
 const ICON_WARNING: &[u8] = include_bytes!("../assets/icons/triangle-alert.svg");
 const ICON_CAUTION: &[u8] = include_bytes!("../assets/icons/octagon-alert.svg");
 const ICON_CHEVRON: &[u8] = include_bytes!("../assets/icons/chevron-down.svg");
-
-/// Header rows drawn this frame, by callout, in window coordinates. Filled
-/// while the editor prepaints, then moved into the `FrameLayout`.
-pub(crate) type HeaderSink = Rc<RefCell<Vec<(BlockId, Bounds<Pixels>)>>>;
 
 /// How strongly the type's colour tints the box.
 pub(crate) const TINT: f32 = 0.08;
@@ -75,7 +69,7 @@ pub(crate) struct CalloutBox<'a> {
     pub(crate) is_last: bool,
     pub(crate) node_cx: &'a RenderContext,
     /// Where the header's bounds are recorded this frame.
-    pub(crate) headers: &'a HeaderSink,
+    pub(crate) headers: &'a BoundsSink,
 }
 
 pub(crate) fn render(callout: CalloutBox, window: &mut Window, cx: &mut App) -> AnyElement {
@@ -100,7 +94,6 @@ pub(crate) fn render(callout: CalloutBox, window: &mut Window, cx: &mut App) -> 
     let radius = theme.radius;
     let gap = node_cx.style().paragraph_gap();
 
-    let sink = headers.clone();
     let header = h_flex()
         .id(("callout-header", id.as_u64() as usize))
         .role(Role::Button)
@@ -136,16 +129,7 @@ pub(crate) fn render(callout: CalloutBox, window: &mut Window, cx: &mut App) -> 
                 .text_color(muted),
         )
         // The type menu hit-tests these bounds (`FrameLayout::callout_headers`).
-        .child(
-            canvas(
-                move |bounds, _, _| sink.borrow_mut().push((id, bounds)),
-                |_, _, _, _| {},
-            )
-            .absolute()
-            .top_0()
-            .left_0()
-            .size_full(),
-        );
+        .child(record_bounds(headers, id));
 
     let nodes: Vec<&BlockNode> = children.iter().collect();
     let blocks: Vec<AnyElement> = children

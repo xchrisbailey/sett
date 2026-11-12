@@ -85,6 +85,12 @@ actions!(
         InsertMenuPick,
         InsertMenuClose,
         OpenCalloutMenu,
+        // FORK: the Code Block language label's menu.
+        OpenLanguageMenu,
+        LanguageMenuUp,
+        LanguageMenuDown,
+        LanguageMenuPick,
+        LanguageMenuClose,
         CalloutMenuUp,
         CalloutMenuDown,
         CalloutMenuPick,
@@ -233,6 +239,8 @@ pub(crate) fn init(cx: &mut App) {
         // FORK: the Callout type menu, for the callout holding the caret;
         // elsewhere the keystroke propagates.
         KeyBinding::new(platform_key!("cmd", "alt-c"), OpenCalloutMenu, ctx),
+        // FORK: the Language Menu for the Code Block holding the caret.
+        KeyBinding::new(platform_key!("cmd", "alt-l"), OpenLanguageMenu, ctx),
         // FORK: follow the Link the caret is in or touches; elsewhere the
         // keystroke propagates. Cmd/Ctrl-Enter is taken by `ExitBlock`.
         KeyBinding::new(platform_key!("cmd", "alt-enter"), FollowWikiLink, ctx),
@@ -289,6 +297,28 @@ pub(crate) fn init(cx: &mut App) {
             LinkPickerClose,
             Some("BlockEditor && link_picker"),
         ),
+        // FORK: the Language Menu's keys, registered last of all.
+        KeyBinding::new("up", LanguageMenuUp, Some("BlockEditor && language_menu")),
+        KeyBinding::new(
+            "down",
+            LanguageMenuDown,
+            Some("BlockEditor && language_menu"),
+        ),
+        KeyBinding::new(
+            "enter",
+            LanguageMenuPick,
+            Some("BlockEditor && language_menu"),
+        ),
+        KeyBinding::new(
+            "tab",
+            LanguageMenuPick,
+            Some("BlockEditor && language_menu"),
+        ),
+        KeyBinding::new(
+            "escape",
+            LanguageMenuClose,
+            Some("BlockEditor && language_menu"),
+        ),
     ]);
 }
 
@@ -302,8 +332,13 @@ pub(crate) const COPY_TAG: &str = "gpui-kit/block-editor/inline-markdown/v1";
 /// back into blocks.
 pub(crate) const BLOCKS_COPY_TAG: &str = "gpui-kit/block-editor/blocks-markdown/v1";
 
+/// FORK: clipboard metadata for a copy from inside one Code Block. The
+/// plain text is the raw code; the tag carries the block's `lang` and `meta`
+/// (`<tag>\n<lang>\n<meta>`) so a paste back into sett can rebuild the block.
+pub(crate) const CODE_COPY_TAG: &str = "gpui-kit/block-editor/code/v1";
+
 /// What the clipboard item says about where it came from.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum CopyKind {
     /// Text from elsewhere: the conservative import.
     External,
@@ -311,22 +346,52 @@ pub(crate) enum CopyKind {
     Inline,
     /// The editor's own copy of whole or partial blocks: block Markdown.
     Blocks,
+    /// FORK: the editor's own copy from inside one Code Block: raw code, plus
+    /// the source block's language and meta.
+    Code {
+        lang: Option<SharedString>,
+        meta: Option<SharedString>,
+    },
 }
 
 impl CopyKind {
     fn of(item: &ClipboardItem) -> Self {
         match item.metadata() {
-            Some(m) if m == COPY_TAG => Self::Inline,
-            Some(m) if m == BLOCKS_COPY_TAG => Self::Blocks,
-            _ => Self::External,
+            Some(m) => Self::from_tag(m),
+            None => Self::External,
         }
     }
 
-    fn tag(self) -> Option<&'static str> {
+    pub(crate) fn from_tag(tag: &str) -> Self {
+        if tag == COPY_TAG {
+            return Self::Inline;
+        }
+        if tag == BLOCKS_COPY_TAG {
+            return Self::Blocks;
+        }
+        if let Some(rest) = tag.strip_prefix(CODE_COPY_TAG)
+            && let Some(rest) = rest.strip_prefix('\n')
+        {
+            let (lang, meta) = rest.split_once('\n').unwrap_or((rest, ""));
+            let some = |s: &str| (!s.is_empty()).then(|| SharedString::from(s.to_owned()));
+            return Self::Code {
+                lang: some(lang),
+                meta: some(meta),
+            };
+        }
+        Self::External
+    }
+
+    pub(crate) fn tag(&self) -> Option<String> {
         match self {
             Self::External => None,
-            Self::Inline => Some(COPY_TAG),
-            Self::Blocks => Some(BLOCKS_COPY_TAG),
+            Self::Inline => Some(COPY_TAG.to_string()),
+            Self::Blocks => Some(BLOCKS_COPY_TAG.to_string()),
+            Self::Code { lang, meta } => Some(format!(
+                "{CODE_COPY_TAG}\n{}\n{}",
+                lang.as_deref().unwrap_or_default(),
+                meta.as_deref().unwrap_or_default()
+            )),
         }
     }
 }
@@ -488,6 +553,8 @@ pub struct BlockEditorState {
     pub(crate) insert_menu_options: Vec<super::insert_menu::InsertMenuOption>,
     /// FORK: the open Callout type menu.
     pub(crate) callout_menu: Option<super::menu::OpenMenu>,
+    /// FORK: the open Language Menu (`language_menu.rs`), query included.
+    pub(crate) language_menu: Option<super::menu::OpenMenu>,
     /// FORK: the open Link Picker, what it is matching, and its candidates.
     pub(crate) link_picker: Option<super::menu::OpenMenu>,
     pub(crate) link_query: super::link_picker::LinkQuery,
@@ -525,9 +592,7 @@ impl BlockEditorState {
                 this.model.break_coalescing();
                 this.end_composition();
                 // FORK: blur closes the menus.
-                this.insert_menu = None;
-                this.callout_menu = None;
-                this.link_picker = None;
+                this.close_editor_menus();
                 cx.emit(BlockEditorEvent::Blur);
             }),
             cx.observe_window_activation(window, |this, window, cx| {
@@ -581,6 +646,7 @@ impl BlockEditorState {
             insert_menu: None,
             insert_menu_options: super::insert_menu::InsertMenuOption::defaults(),
             callout_menu: None,
+            language_menu: None,
             link_picker: None,
             link_query: Default::default(),
             link_candidates: Vec::new().into(),
@@ -618,6 +684,9 @@ impl BlockEditorState {
         }
         if self.link_picker.is_some() {
             context.push_str(" link_picker");
+        }
+        if self.language_menu.is_some() {
+            context.push_str(" language_menu");
         }
         context
     }
@@ -1076,7 +1145,7 @@ impl BlockEditorState {
         // document as it was when it opened, so it closes.
         self.sync_insert_menu();
         self.sync_link_picker(true);
-        self.callout_menu = None;
+        self.close_block_menus();
         self.goal_x = None;
         self.reveal.set(true);
         self.pause_blink(cx);
@@ -1093,7 +1162,7 @@ impl BlockEditorState {
         // the caret leaves its paragraph.
         self.sync_insert_menu();
         self.sync_link_picker(false);
-        self.callout_menu = None;
+        self.close_block_menus();
         self.reveal.set(true);
         self.pause_blink(cx);
         cx.emit(BlockEditorEvent::SelectionChanged);
@@ -1689,6 +1758,12 @@ impl BlockEditorState {
         self.frame.borrow().callout_header_at(at)
     }
 
+    /// FORK: the Code Block whose language label is drawn under the window
+    /// point `at`, as of the last frame; a click on it opens the Language Menu.
+    pub fn code_label_at(&self, at: Point<Pixels>) -> Option<BlockId> {
+        self.frame.borrow().code_label_at(at)
+    }
+
     /// The url of the link under the mouse, if any (D14 hover).
     pub fn hovered_link(&self) -> Option<&SharedString> {
         self.hovered_link.as_ref()
@@ -2261,67 +2336,26 @@ impl BlockEditorState {
         let _ = self.run(EditorCommand::ToggleMark(kind), cx);
     }
 
-    /// The selection as clipboard text, and whether it is the editor's own
-    /// inline Markdown (D17): then the copy is tagged with
-    /// [`COPY_TAG`] so paste parses it back.
+    /// The selection as clipboard text and what kind of copy it is; see
+    /// [`BlockEditorModel::copy_selection`].
     fn selected_text(&self) -> (String, CopyKind) {
-        if let Some(table) = self.model.cells_markdown() {
-            return (table, CopyKind::Blocks);
-        }
-        if let Some((parent, range)) = self.model.selected_blocks() {
-            let ids = &self.model.doc.children(parent)[range];
-            return (
-                super::serialize::join_blocks(&self.model.doc, ids),
-                CopyKind::Blocks,
-            );
-        }
-        let Ok(range) = self.model.doc.resolve_selection(self.model.selection()) else {
-            return (String::new(), CopyKind::External);
-        };
-        // Several blocks: Markdown for the whole selection (D18).
-        if range.start.block != range.end.block
-            && let Some(markdown) = super::slice::selection_markdown(&self.model.doc, range)
-        {
-            return (markdown, CopyKind::Blocks);
-        }
-        let mut inline_only = true;
-        let text = self
-            .model
-            .text_ranges(range)
-            .into_iter()
-            .filter_map(|(id, lo, hi)| {
-                // Marks and inline atoms copy as Markdown (an image as
-                // `![alt](url)`, never the U+FFFC placeholder, #3113). A
-                // partial selection serializes as its own inline, so
-                // delimiters are always balanced at the cut edges.
-                if let Some(inline) = self.model.doc.inline(id) {
-                    return Some(super::serialize::inline_copy_markdown(
-                        &inline.slice(lo..hi),
-                    ));
-                }
-                inline_only = false;
-                let text = self.model.doc.leaf_text(id)?;
-                text.get(lo..hi).map(str::to_string)
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        (
-            text,
-            if inline_only {
-                CopyKind::Inline
-            } else {
-                CopyKind::External
-            },
-        )
+        self.model.copy_selection()
     }
 
     // ---- action handlers --------------------------------------------------
 
     pub(crate) fn on_backspace(&mut self, _: &Backspace, _: &mut Window, cx: &mut Context<Self>) {
+        // FORK: the Language Menu's query takes the key.
+        if self.language_query_backspace(cx) {
+            return;
+        }
         self.end_composition();
         self.edit(EditOrigin::Backspace, |m| m.delete(false), cx);
     }
     pub(crate) fn on_delete(&mut self, _: &Delete, _: &mut Window, cx: &mut Context<Self>) {
+        if self.language_menu.is_some() {
+            return;
+        }
         self.end_composition();
         self.edit(EditOrigin::DeleteForward, |m| m.delete(true), cx);
     }
@@ -2660,6 +2694,40 @@ impl BlockEditorState {
     ) {
         self.close_menu(super::menu::MenuSlot::Callout, cx);
     }
+    pub(crate) fn on_language_menu_up(
+        &mut self,
+        _: &LanguageMenuUp,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.language_menu_move(false, cx);
+    }
+    pub(crate) fn on_language_menu_down(
+        &mut self,
+        _: &LanguageMenuDown,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.language_menu_move(true, cx);
+    }
+    pub(crate) fn on_language_menu_pick(
+        &mut self,
+        _: &LanguageMenuPick,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(ix) = self.language_menu.as_ref().map(|m| m.highlighted) {
+            self.language_menu_pick(ix, cx);
+        }
+    }
+    pub(crate) fn on_language_menu_close(
+        &mut self,
+        _: &LanguageMenuClose,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.close_menu(super::menu::MenuSlot::Language, cx);
+    }
     fn table_key(&mut self, edit: Option<crate::TableEdit>, cx: &mut Context<Self>) {
         if self.readonly || self.model.current_cell().is_none() {
             cx.propagate();
@@ -2761,7 +2829,7 @@ impl BlockEditorState {
             return;
         }
         cx.write_to_clipboard(match kind.tag() {
-            Some(tag) => ClipboardItem::new_string_with_metadata(text, tag.to_string()),
+            Some(tag) => ClipboardItem::new_string_with_metadata(text, tag),
             None => ClipboardItem::new_string(text),
         });
     }
@@ -2847,25 +2915,14 @@ impl BlockEditorState {
         }
         self.pending_paste = None;
         if let Some(text) = text {
-            self.paste_text(text, request.plain, request.copy, cx);
+            self.paste_text(text, request.plain, request.copy.clone(), cx);
         }
         true
     }
     fn paste_text(&mut self, text: &str, plain: bool, copy: CopyKind, cx: &mut Context<Self>) {
         self.edit(
             EditOrigin::Paste,
-            |model| {
-                if !plain && copy == CopyKind::Blocks && model.paste_blocks_markdown(text)? {
-                    return Ok(());
-                }
-                if !plain && copy != CopyKind::External && model.paste_inline_markdown(text)? {
-                    return Ok(());
-                }
-                if !plain && model.paste_blocks(text)? {
-                    return Ok(());
-                }
-                model.insert_text(text, EditOrigin::Paste)
-            },
+            |model| model.paste_clipboard(text, plain, &copy),
             cx,
         );
     }
@@ -3241,6 +3298,11 @@ impl EntityInputHandler for BlockEditorState {
         if self.readonly {
             return;
         }
+        // FORK: typed text goes to the Language Menu's query, not the code.
+        if self.language_menu.is_some() {
+            self.language_query_type(text, cx);
+            return;
+        }
         let composing = self.marked.is_some();
         self.select_marked_or(range16);
         let origin = if composing {
@@ -3273,7 +3335,9 @@ impl EntityInputHandler for BlockEditorState {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.readonly {
+        // FORK: text being composed stays out of the Language Menu's query
+        // until it is committed.
+        if self.readonly || self.language_menu.is_some() {
             return;
         }
         if new_text.is_empty() {
