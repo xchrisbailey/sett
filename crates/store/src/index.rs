@@ -272,6 +272,11 @@ impl SpaceIndex {
             ItemId::Journal(date) => self.journal_entry(*date).map(|e| e.date.to_string()),
         }
     }
+
+    /// [`Self::title`], or the Item's slug when it can't be read.
+    pub fn title_or_slug(&self, item: &ItemId) -> String {
+        self.title(item).unwrap_or_else(|| item.slug())
+    }
 }
 
 fn task_id(task: &Task) -> ItemId {

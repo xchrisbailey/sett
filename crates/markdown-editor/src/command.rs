@@ -3,7 +3,7 @@ use super::{
     editor::BlockEditorModel,
     id::BlockId,
     inline::InlineText,
-    kind::{BlockKind, BlockKindData, default_list_marker},
+    kind::{BlockKind, BlockKindData, Callout, CalloutKind, default_list_marker},
     marks::{MarkChange, MarkKind, MarkState},
     position::{BlockPosition, PositionError},
     selection::{BlockSelection, ResolvedSelection, SelectionError},
@@ -51,6 +51,12 @@ pub enum EditorCommand {
     /// or, when the caret is already in one, unwrap the nearest quote
     /// (its blocks move out in place; nothing is lost).
     ToggleBlockquote,
+    /// FORK: make the caret's top-level quote a Callout of this type (its
+    /// marker is written in uppercase), or a plain quote with `None`.
+    SetCallout(Option<CalloutKind>),
+    /// FORK: insert an empty Callout after the caret's block, replacing it
+    /// when it is an empty paragraph, and put the caret on its empty line.
+    InsertCallout(CalloutKind),
 }
 
 #[non_exhaustive]
@@ -564,6 +570,19 @@ impl BlockEditorModel {
                 tx.remove_block(pos.block)?;
                 return Ok(None);
             };
+            // FORK: next to a closed Link chip, Backspace / Delete takes the
+            // whole `[[…]]` span in one transaction (an open chip has the
+            // caret strictly inside, so it falls through to one character).
+            if let Some(span) = crate::wiki_chip::chip_spans(inline).into_iter().find(|s| {
+                if forward {
+                    s.start == pos.offset
+                } else {
+                    s.end == pos.offset
+                }
+            }) {
+                tx.replace_text(pos.block, span.clone(), InlineText::new())?;
+                return Ok(caret(BlockPosition::new(pos.block, span.start)));
+            }
             if !forward && pos.offset > 0 {
                 let prev = inline.prev_grapheme(pos.offset).unwrap_or(0);
                 tx.replace_text(pos.block, prev..pos.offset, InlineText::new())?;
@@ -873,13 +892,19 @@ impl BlockEditorModel {
         let Some((quote, index)) = doc.index_in_parent(pos.block) else {
             return Ok(false);
         };
-        if doc.kind(quote) != Some(&BlockKindData::Blockquote) {
+        if !matches!(doc.kind(quote), Some(BlockKindData::Blockquote { .. })) {
             return Ok(false);
         }
         let Some((outer, quote_index)) = doc.index_in_parent(quote) else {
             return Ok(false);
         };
         let count = doc.children(quote).len();
+        // FORK: the blocks after the caret stay the callout only when the caret
+        // left from its first line; otherwise they continue as a plain quote.
+        let tail_kind = match doc.kind(quote) {
+            Some(kind) if index == 0 => kind.clone(),
+            _ => BlockKindData::Blockquote { callout: None },
+        };
         let leaf = pos.block;
         self.transact(EditOrigin::Command("exit_quote"), |tx| {
             let rest = tx.remove(quote, index + 1..count)?;
@@ -891,7 +916,7 @@ impl BlockEditorModel {
             }
             tx.insert(outer, at, vec![para])?;
             if !rest.is_empty() {
-                let tail = DetachedBlock::container(BlockKindData::Blockquote, rest);
+                let tail = DetachedBlock::container(tail_kind, rest);
                 tx.insert(outer, at + 1, vec![tail])?;
             }
             Ok(caret(BlockPosition::new(leaf, 0)))
@@ -909,7 +934,7 @@ impl BlockEditorModel {
         let Some((quote, 0)) = doc.index_in_parent(pos.block) else {
             return Ok(false);
         };
-        if doc.kind(quote) != Some(&BlockKindData::Blockquote) {
+        if !matches!(doc.kind(quote), Some(BlockKindData::Blockquote { .. })) {
             return Ok(false);
         }
         let Some((outer, quote_index)) = doc.index_in_parent(quote) else {
@@ -1321,6 +1346,9 @@ impl BlockEditorModel {
             EditorCommand::Outdent => self.outdent(),
             EditorCommand::SetCodeBlock { lang } => self.set_code_block(lang),
             EditorCommand::ToggleBlockquote => self.toggle_blockquote(),
+            // FORK
+            EditorCommand::SetCallout(kind) => self.set_callout(kind),
+            EditorCommand::InsertCallout(kind) => self.insert_callout(kind),
             EditorCommand::MoveBlocks { down } => self.move_blocks(down),
             EditorCommand::InsertBlock(BlockKind::HorizontalRule) => {
                 let pos = self
@@ -1592,7 +1620,8 @@ impl BlockEditorModel {
                 .index_in_parent(leaf)
                 .ok_or(StepError::UnknownBlock(leaf))?;
             let block = tx.remove_block(leaf)?;
-            let quote = DetachedBlock::container(BlockKindData::Blockquote, vec![block]);
+            let quote =
+                DetachedBlock::container(BlockKindData::Blockquote { callout: None }, vec![block]);
             tx.insert(parent, index, vec![quote])?;
             Ok(None)
         })
@@ -1602,7 +1631,7 @@ impl BlockEditorModel {
     pub fn in_blockquote(&self) -> bool {
         self.caret_resolved()
             .ok()
-            .and_then(|r| r.nearest(&self.doc, |k| matches!(k, BlockKindData::Blockquote)))
+            .and_then(|r| r.nearest(&self.doc, |k| matches!(k, BlockKindData::Blockquote { .. })))
             .is_some()
     }
 
@@ -1634,7 +1663,8 @@ impl BlockEditorModel {
     fn toggle_blockquote(&mut self) -> Result<bool, CommandError> {
         let resolved = self.caret_resolved()?;
         let pos = resolved.pos;
-        if let Some(quote) = resolved.nearest(&self.doc, |k| matches!(k, BlockKindData::Blockquote))
+        if let Some(quote) =
+            resolved.nearest(&self.doc, |k| matches!(k, BlockKindData::Blockquote { .. }))
         {
             let (outer, index) = self
                 .doc
@@ -1660,6 +1690,97 @@ impl BlockEditorModel {
         }
         self.wrap_in_blockquote()?;
         let _ = self.set_selection(BlockSelection::caret(pos));
+        Ok(true)
+    }
+
+    /// FORK: the top-level Callout holding the caret, if any.
+    pub(crate) fn caret_callout(&self) -> Option<BlockId> {
+        let resolved = self.caret_resolved().ok()?;
+        resolved.path.get(1).copied().filter(|id| {
+            self.doc
+                .kind(*id)
+                .and_then(BlockKindData::callout_kind)
+                .is_some()
+        })
+    }
+
+    /// FORK: only a top-level quote is drawn as a Callout, so that is the
+    /// one the type is set on, even from a quote nested inside it.
+    fn set_callout(&mut self, kind: Option<CalloutKind>) -> Result<bool, CommandError> {
+        let resolved = self.caret_resolved()?;
+        let quote = resolved
+            .path
+            .get(1)
+            .copied()
+            .filter(|id| matches!(self.doc.kind(*id), Some(BlockKindData::Blockquote { .. })))
+            .ok_or(CommandError::Unsupported("callout here"))?;
+        self.retype_quote(quote, kind)
+    }
+
+    /// FORK: set the type of the quote `quote` (`None` makes it a plain
+    /// quote), leaving the selection where it is. The type menu uses this for
+    /// a callout the caret may not be in.
+    pub(crate) fn retype_quote(
+        &mut self,
+        quote: BlockId,
+        kind: Option<CalloutKind>,
+    ) -> Result<bool, CommandError> {
+        if !matches!(self.doc.kind(quote), Some(BlockKindData::Blockquote { .. })) {
+            return Err(CommandError::Unsupported("callout here"));
+        }
+        let selection = self.selection.clone();
+        self.transact(EditOrigin::Command("set_callout"), |tx| {
+            tx.set_kind(
+                quote,
+                BlockKindData::Blockquote {
+                    callout: kind.map(Callout::new),
+                },
+            )?;
+            Ok(Some(selection))
+        })
+    }
+
+    /// FORK: whether `InsertCallout` applies: the caret's block must be top
+    /// level, since a nested quote draws as a plain quote and never loads as
+    /// a Callout. The Insert Menu hides its callout options otherwise.
+    pub(crate) fn can_insert_callout(&self) -> bool {
+        self.caret().is_some_and(|pos| {
+            self.doc
+                .index_in_parent(pos.block)
+                .is_some_and(|(parent, _)| parent == self.doc.root)
+        })
+    }
+
+    /// FORK: like `insert_table`, for an empty Callout, after a top-level
+    /// block only.
+    fn insert_callout(&mut self, kind: CalloutKind) -> Result<bool, CommandError> {
+        let pos = self
+            .caret()
+            .ok_or(CommandError::Unsupported("block selection"))?;
+        if !self.can_insert_callout() {
+            return Err(CommandError::Unsupported("callout here"));
+        }
+        let line = DetachedBlock::paragraph(InlineText::new());
+        let first = line.id;
+        let callout = DetachedBlock::container(
+            BlockKindData::Blockquote {
+                callout: Some(Callout::new(kind)),
+            },
+            vec![line],
+        );
+        let empty = self.doc.leaf_len(pos.block) == Some(0)
+            && self.doc.kind(pos.block) == Some(&BlockKindData::Paragraph);
+        self.transact(EditOrigin::Command("insert_callout"), |tx| {
+            let (parent, index) = tx
+                .doc
+                .index_in_parent(pos.block)
+                .ok_or(PositionError::UnknownBlock(pos.block))?;
+            tx.insert(parent, index + 1, vec![callout])?;
+            if empty {
+                tx.remove_block(pos.block)?;
+            }
+            Ok(caret(BlockPosition::new(first, 0)))
+        })?;
         Ok(true)
     }
 

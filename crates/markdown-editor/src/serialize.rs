@@ -9,6 +9,7 @@ use super::{
     inline::{InlineAtom, InlineText},
     kind::BlockKindData,
 };
+use crate::kind::CalloutKind;
 use crate::markdown_source::{
     MarkdownSource, MarkdownSourceOptions, markdown_destination, markdown_title,
 };
@@ -59,17 +60,28 @@ fn block(doc: &EditorDocument, id: BlockId) -> String {
                 text.replace('\n', " ")
             )
         }
-        (BlockKindData::Blockquote, _) => join_blocks(doc, children)
-            .lines()
-            .map(|line| {
-                if line.is_empty() {
-                    ">".to_string()
-                } else {
-                    format!("> {line}")
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("\n"),
+        (BlockKindData::Blockquote { callout }, _) => {
+            let body = join_blocks(doc, children);
+            // FORK: a Callout writes its marker line, then its contents
+            // straight after it. An empty one is just the marker.
+            let Some(callout) = callout else {
+                return quote_lines(&escape_callout_marker(doc, id, body));
+            };
+            let marker = format!("[!{}]", callout.marker);
+            if body.trim_matches(['\n', '\r']).is_empty() {
+                return quote_lines(&marker);
+            }
+            // An empty first paragraph already starts the body with a
+            // blank line.
+            let separator = if body.starts_with('\n') {
+                ""
+            } else if follows_marker_line(doc, children.first()) {
+                "\n"
+            } else {
+                "\n\n"
+            };
+            quote_lines(&format!("{marker}{separator}{body}"))
+        }
         (
             BlockKindData::List {
                 ordered,
@@ -199,6 +211,77 @@ fn block(doc: &EditorDocument, id: BlockId) -> String {
     }
 }
 
+fn quote_lines(text: &str) -> String {
+    text.lines()
+        .map(|line| {
+            if line.is_empty() {
+                ">".to_string()
+            } else {
+                format!("> {line}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// FORK: `body` of the plain quote `id`, with a leading `[!TYPE]` marker
+/// escaped where it would read back as a Callout. Its text came from an
+/// escaped `\[!NOTE]`, and the literal writer keeps `[!X]` bare.
+fn escape_callout_marker(doc: &EditorDocument, id: BlockId, body: String) -> String {
+    let top_level = doc
+        .parent(id)
+        .is_some_and(|parent| matches!(doc.kind(parent), Some(BlockKindData::Root)));
+    let first_line = body.lines().next().unwrap_or_default();
+    let is_marker = first_line
+        .trim_end_matches([' ', '\t'])
+        .strip_prefix("[!")
+        .and_then(|rest| rest.strip_suffix(']'))
+        .is_some_and(|marker| CalloutKind::from_marker(marker).is_some());
+    if top_level && is_marker {
+        format!("\\{body}")
+    } else {
+        body
+    }
+}
+
+/// FORK: whether `first` can start on the line after a Callout's marker.
+/// The marker line is a paragraph line, so only blocks that interrupt a
+/// paragraph can; anything else (a rule would make the marker a setext
+/// heading) gets a blank line first, which reloads the same.
+fn follows_marker_line(doc: &EditorDocument, first: Option<&BlockId>) -> bool {
+    let Some(&first) = first else {
+        return false;
+    };
+    match doc.kind(first) {
+        Some(
+            BlockKindData::Paragraph
+            | BlockKindData::Heading { .. }
+            | BlockKindData::CodeBlock { .. }
+            | BlockKindData::Blockquote { .. },
+        ) => true,
+        // An ordered list interrupts a paragraph only when it starts at 1.
+        // FORK: a bare first item (`> - `) would read back as a setext
+        // underline under the marker line, so it keeps the blank `>` line.
+        Some(BlockKindData::List { ordered, start, .. }) => {
+            (!ordered || start.unwrap_or(1) == 1) && !first_item_is_bare(doc, first)
+        }
+        _ => false,
+    }
+}
+
+/// Whether `list`'s first item holds nothing but empty paragraphs, so it
+/// saves as a bare marker.
+fn first_item_is_bare(doc: &EditorDocument, list: BlockId) -> bool {
+    doc.children(list).first().is_some_and(|item| {
+        doc.children(*item).iter().all(|leaf| {
+            matches!(doc.kind(*leaf), Some(BlockKindData::Paragraph))
+                && doc
+                    .inline(*leaf)
+                    .is_some_and(|inline| inline.text().trim().is_empty())
+        })
+    })
+}
+
 /// FORK: whether a delimiter row kept from the source still describes
 /// `width` columns aligned as `aligns`.
 fn delimiter_row_matches(row: &str, aligns: &[ColumnAlign], width: usize) -> bool {
@@ -242,15 +325,7 @@ fn list_item(doc: &EditorDocument, item: BlockId, marker: &str) -> String {
             let is_list = matches!(doc.kind(*child), Some(BlockKindData::List { .. }));
             // A bare nested marker cannot interrupt a paragraph; without a
             // blank line it becomes literal body text on restore.
-            let bare_nested = is_list
-                && doc.children(*child).first().is_some_and(|item| {
-                    doc.children(*item).iter().all(|leaf| {
-                        matches!(doc.kind(*leaf), Some(BlockKindData::Paragraph))
-                            && doc
-                                .inline(*leaf)
-                                .is_some_and(|inline| inline.text().trim().is_empty())
-                    })
-                });
+            let bare_nested = is_list && first_item_is_bare(doc, *child);
             // Two paragraphs in a row need a blank line, or they merge.
             body.push_str(
                 if spread || bare_nested || (!is_list && !prev_is_list) || prev_is_list {

@@ -1,0 +1,7 @@
+{
+  "sandbox": {
+    "excludedCommands": [
+      "scripts/screenshot *"
+    ]
+  }
+}

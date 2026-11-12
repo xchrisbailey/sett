@@ -473,7 +473,8 @@ fn callout_marker_len(text: &str) -> Option<usize> {
 /// cell still escapes): written bare they parse back to the same literal
 /// text, as long as nothing after them turns the brackets into a link (`(`
 /// or `[`).
-fn wiki_link_spans(text: &str) -> Vec<std::ops::Range<usize>> {
+// FORK: `pub(crate)` so the chip projection shares this decision.
+pub(crate) fn wiki_link_spans(text: &str) -> Vec<std::ops::Range<usize>> {
     let mut spans = Vec::new();
     let mut from = 0;
     while let Some(open) = text[from..].find("[[").map(|at| from + at) {

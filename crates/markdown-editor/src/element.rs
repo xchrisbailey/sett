@@ -116,6 +116,12 @@ impl RenderOnce for BlockEditor {
                         }
                         _ => range,
                     };
+                    // FORK: model bytes to the renderer's, widened to whole
+                    // chips.
+                    let range = match snapshot.chips.get(&block) {
+                        Some(chips) => chips.range_to_rendered(range),
+                        None => range,
+                    };
                     backgrounds
                         .entry(block.as_u64())
                         .or_default()
@@ -156,6 +162,8 @@ impl RenderOnce for BlockEditor {
             (state.cull.clone(), state.model.revision())
         };
         let mut children: Vec<AnyElement> = Vec::new();
+        // FORK: callout header bounds, filled at prepaint (`callout.rs`).
+        let callout_headers = super::callout::HeaderSink::default();
         {
             let mut cull_state = cull.borrow_mut();
             cull_state.measured.clear();
@@ -252,7 +260,27 @@ impl RenderOnce for BlockEditor {
                 let flow = unit.flow;
                 let is_last_node = node_ix + 1 == count;
                 let node = &snapshot.blocks[unit.block].nodes[unit.node];
+                // FORK: a top-level Callout draws its own box (#16).
+                // A list chunk (`items`) is never a quote.
+                let callout = match unit.items {
+                    None => self.state.read(cx).callout_kind(unit.id),
+                    Some(_) => None,
+                };
                 let element = match (&unit.items, node) {
+                    (None, BlockNode::Blockquote { children, .. }) if let Some(kind) = callout => {
+                        super::callout::render(
+                            super::callout::CalloutBox {
+                                kind,
+                                id: unit.id,
+                                children,
+                                is_last: is_last_node,
+                                node_cx: &node_cx,
+                                headers: &callout_headers,
+                            },
+                            window,
+                            cx,
+                        )
+                    }
                     (
                         Some((range, ids)),
                         BlockNode::List {
@@ -290,7 +318,12 @@ impl RenderOnce for BlockEditor {
                     _ => node.render(node_ix, flow.last(is_last_node), &node_cx, window, cx),
                 };
                 // Per-block accessibility node around the rendered block.
-                let element = match block_role(node) {
+                // FORK: a Callout is a `Note` landmark.
+                let role = match callout {
+                    Some(_) => Some((Role::Note, None)),
+                    None => block_role(node),
+                };
+                let element = match role {
                     Some((role, level)) => div()
                         .id(("block", unit.id.as_u64() as usize))
                         .role(role)
@@ -329,16 +362,30 @@ impl RenderOnce for BlockEditor {
             .when(window.is_a11y_active() || cfg!(test), |this| {
                 this.aria_value(self.state.read(cx).accessible_value())
             })
-            .key_context(self.state.read(cx).key_context())
+            // FORK: `key_context` builds its string now (menu contexts).
+            .key_context(self.state.read(cx).key_context().as_str())
             .track_focus(&focus)
             .cursor(if self.state.read(cx).grip_hover {
                 CursorStyle::OpenHand
             } else if self.state.read(cx).pointer_hand {
                 CursorStyle::PointingHand
+            } else if self.state.read(cx).pointer_arrow {
+                // FORK: an arrow over a broken Link chip.
+                CursorStyle::Arrow
             } else {
                 CursorStyle::IBeam
             })
             .w_full()
+            // FORK: pressing or releasing Cmd/Ctrl over a Link chip changes
+            // how it looks without the pointer moving.
+            .on_modifiers_changed({
+                let state = self.state.clone();
+                move |event, window, cx| {
+                    let at = window.mouse_position();
+                    let held = secondary_modifier().is_subset_of(&event.modifiers);
+                    state.update(cx, |state, cx| state.hover_at(at, held, cx));
+                }
+            })
             .on_action(window.listener_for(s, BlockEditorState::on_backspace))
             .on_action(window.listener_for(s, BlockEditorState::on_delete))
             .on_action(window.listener_for(s, BlockEditorState::on_delete_word_left))
@@ -383,6 +430,21 @@ impl RenderOnce for BlockEditor {
             .on_action(window.listener_for(s, BlockEditorState::on_table_insert_row_below))
             .on_action(window.listener_for(s, BlockEditorState::on_table_delete_line))
             .on_action(window.listener_for(s, BlockEditorState::on_close_table_menu))
+            // FORK: the Insert Menu's and Callout type menu's actions.
+            .on_action(window.listener_for(s, BlockEditorState::on_insert_menu_up))
+            .on_action(window.listener_for(s, BlockEditorState::on_insert_menu_down))
+            .on_action(window.listener_for(s, BlockEditorState::on_insert_menu_pick))
+            .on_action(window.listener_for(s, BlockEditorState::on_insert_menu_close))
+            .on_action(window.listener_for(s, BlockEditorState::on_open_callout_menu))
+            .on_action(window.listener_for(s, BlockEditorState::on_callout_menu_up))
+            .on_action(window.listener_for(s, BlockEditorState::on_callout_menu_down))
+            .on_action(window.listener_for(s, BlockEditorState::on_callout_menu_pick))
+            .on_action(window.listener_for(s, BlockEditorState::on_callout_menu_close))
+            .on_action(window.listener_for(s, BlockEditorState::on_follow_wiki_link))
+            .on_action(window.listener_for(s, BlockEditorState::on_link_picker_up))
+            .on_action(window.listener_for(s, BlockEditorState::on_link_picker_down))
+            .on_action(window.listener_for(s, BlockEditorState::on_link_picker_pick))
+            .on_action(window.listener_for(s, BlockEditorState::on_link_picker_close))
             .on_action(window.listener_for(s, BlockEditorState::on_toggle_bold))
             .on_action(window.listener_for(s, BlockEditorState::on_toggle_toolbar))
             .on_action(window.listener_for(s, BlockEditorState::on_toggle_italic))
@@ -396,6 +458,10 @@ impl RenderOnce for BlockEditor {
             .on_action(window.listener_for(s, BlockEditorState::on_native_paste))
             .on_action(window.listener_for(s, BlockEditorState::on_paste_plain))
             .children(super::table_ui::render_menu(&self.state, cx))
+            // FORK: the Insert Menu and Callout type menu popovers.
+            .children(super::insert_menu::render(&self.state, cx))
+            .children(super::callout_menu::render(&self.state, cx))
+            .children(super::link_picker::render(&self.state, cx))
             .child(EditorRoot {
                 state: self.state.clone(),
                 child: Some(
@@ -417,6 +483,8 @@ impl RenderOnce for BlockEditor {
                         .into_any_element(),
                 ),
                 content_bounds,
+                // FORK
+                callout_headers,
                 padding: root_style.padding,
                 typography,
                 caret_was_visible,
@@ -436,6 +504,8 @@ struct EditorRoot {
     snapshot: Rc<Snapshot>,
     style: BlockEditorStyle,
     content_bounds: Rc<Cell<Bounds<Pixels>>>,
+    /// FORK: where callout headers record their bounds this frame.
+    callout_headers: super::callout::HeaderSink,
     padding: Edges<DefiniteLength>,
     typography: TextStyle,
     caret_was_visible: bool,
@@ -531,6 +601,8 @@ impl Element for EditorRoot {
         cx: &mut App,
     ) -> Prepaint {
         if let Some(backgrounds) = self.backgrounds.take() {
+            // FORK: collect this frame's callout headers.
+            self.callout_headers.borrow_mut().clear();
             let (_, geometries) = collect_leaf_geometry(backgrounds, || child.prepaint(window, cx));
             // Swap in the complete frame; handlers read it until the next one.
             let mut frame = super::frame::into_frame(
@@ -539,6 +611,8 @@ impl Element for EditorRoot {
                 &self.snapshot.tables,
             );
             frame.content = Some(self.content_bounds.get());
+            // FORK
+            frame.callout_headers = self.callout_headers.take();
             {
                 let state = self.state.read(cx);
                 let doc = &state.model.doc;
@@ -789,6 +863,18 @@ impl Element for EditorRoot {
                 cx.stop_propagation();
                 return;
             }
+            // FORK: a callout's header opens its type menu, leaving the caret
+            // where it is.
+            if !event.modifiers.shift
+                && entity.update(cx, |state, cx| {
+                    state.click_callout_header(event.position, cx)
+                })
+            {
+                let focus = entity.read(cx).focus_handle.clone();
+                window.focus(&focus, cx);
+                cx.stop_propagation();
+                return;
+            }
             // A task checkbox toggles without moving the caret or starting
             // a drag; nothing else handles this mouse-down.
             if !event.modifiers.shift
@@ -801,7 +887,9 @@ impl Element for EditorRoot {
                 let focus = state.focus_handle.clone();
                 window.focus(&focus, cx);
                 if secondary_modifier().is_subset_of(&event.modifiers)
-                    && state.follow_link_at(event.position, cx)
+                    && (state.follow_link_at(event.position, cx)
+                        // FORK: a Link chip follows too.
+                        || state.follow_wiki_link_at(event.position, cx))
                 {
                     return;
                 }
@@ -812,6 +900,14 @@ impl Element for EditorRoot {
                 state.mouse_at(event.position, event.modifiers.shift, cx);
                 if !event.modifiers.shift && event.click_count >= 2 {
                     state.select_unit(event.click_count >= 3, cx);
+                }
+                // FORK: a plain single click on a Link chip opens it on
+                // release.
+                if !event.modifiers.shift
+                    && event.click_count == 1
+                    && !secondary_modifier().is_subset_of(&event.modifiers)
+                {
+                    state.press_chip(event.position);
                 }
             });
         });
@@ -847,6 +943,8 @@ impl Element for EditorRoot {
             if phase == DispatchPhase::Bubble {
                 entity.update(cx, |state, cx| {
                     state.dragging = false;
+                    // FORK: a plain click on a Link chip opens it.
+                    state.release_chip(cx);
                     state.finish_block_drag(cx);
                 });
             }

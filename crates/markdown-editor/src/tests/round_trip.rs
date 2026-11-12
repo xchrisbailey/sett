@@ -601,3 +601,142 @@ fn external_multi_line_paste_still_splits_lines_into_blocks() {
     let mut editor = model("");
     assert!(!editor.paste_blocks("one\ntwo").unwrap());
 }
+
+// FORK: callouts.
+
+/// The callout of the `ix`-th top-level block, through the public kind.
+fn callout_of(editor: &BlockEditorModel, ix: usize) -> Option<CalloutKind> {
+    match editor.document().root().children().nth(ix).unwrap().kind() {
+        BlockKind::Blockquote { callout } => callout,
+        other => panic!("not a quote: {other:?}"),
+    }
+}
+
+#[test]
+fn callout_loads_its_type_and_saves_unchanged() {
+    let source = "> [!NOTE]\n> Body";
+    let editor = model(source);
+    assert_eq!(callout_of(&editor, 0), Some(CalloutKind::Note));
+    // The marker and its line break are not part of the editable text.
+    assert_eq!(only_text(&editor), "Body");
+    assert_eq!(editor.source(), source);
+}
+
+#[test]
+fn every_callout_type_loads_in_either_case_and_keeps_its_marker() {
+    let types = [
+        ("NOTE", CalloutKind::Note),
+        ("TIP", CalloutKind::Tip),
+        ("IMPORTANT", CalloutKind::Important),
+        ("WARNING", CalloutKind::Warning),
+        ("CAUTION", CalloutKind::Caution),
+    ];
+    for (marker, kind) in types {
+        for marker in [marker.to_string(), marker.to_lowercase()] {
+            let source = format!("> [!{marker}]\n> Body");
+            let editor = model(&source);
+            assert_eq!(callout_of(&editor, 0), Some(kind), "{source}");
+            assert_eq!(editor.source(), source);
+        }
+    }
+}
+
+#[test]
+fn callout_marker_on_its_own_paragraph_saves_without_the_blank_line() {
+    let editor = model("> [!TIP]\n>\n> Body");
+    assert_eq!(callout_of(&editor, 0), Some(CalloutKind::Tip));
+    assert_eq!(only_text(&editor), "Body");
+    // Documented normalisation: the blank `>` line after the marker goes.
+    assert_eq!(editor.source(), "> [!TIP]\n> Body");
+}
+
+#[test]
+fn callout_with_several_blocks_round_trips() {
+    let source = "> [!WARNING]\n> Careful:\n>\n> - one\n> - two\n>\n> ```rust\n> let x = 1;\n> ```";
+    let editor = model(source);
+    assert_eq!(callout_of(&editor, 0), Some(CalloutKind::Warning));
+    assert_eq!(editor.source(), source);
+    // Blocks straight after the marker line, with no paragraph between.
+    for source in [
+        "> [!NOTE]\n> - one\n> - two",
+        "> [!NOTE]\n> ```\n> code\n> ```",
+    ] {
+        let editor = model(source);
+        assert_eq!(callout_of(&editor, 0), Some(CalloutKind::Note), "{source}");
+        assert_eq!(editor.source(), source);
+    }
+    // A rule straight after the marker would make it a setext heading, so
+    // the blank line stays.
+    let source = "> [!NOTE]\n>\n> ---";
+    assert_eq!(callout_of(&model(source), 0), Some(CalloutKind::Note));
+    assert_eq!(model(source).source(), source);
+}
+
+#[test]
+fn empty_callout_round_trips() {
+    let editor = model("> [!CAUTION]");
+    assert_eq!(callout_of(&editor, 0), Some(CalloutKind::Caution));
+    // One empty line to type into.
+    assert_eq!(only_text(&editor), "");
+    assert_eq!(editor.source(), "> [!CAUTION]");
+    let editor = model("a\n\n> [!note]\n\nb");
+    assert_eq!(callout_of(&editor, 1), Some(CalloutKind::Note));
+    assert_eq!(editor.source(), "a\n\n> [!note]\n\nb");
+}
+
+#[test]
+fn quotes_that_are_not_callouts_stay_plain_quotes() {
+    for source in [
+        "> [!NOTE] Title\n> Body",
+        "> [!FOO]\n> Body",
+        "> [!NOTE]Body",
+    ] {
+        let editor = model(source);
+        assert_eq!(callout_of(&editor, 0), None, "{source}");
+        assert_eq!(editor.source(), source);
+    }
+    // An escaped marker is literal text.
+    assert_eq!(callout_of(&model("> \\[!NOTE]\n> Body"), 0), None);
+}
+
+#[test]
+fn nested_callout_marker_stays_a_plain_quote() {
+    let source = "> > [!NOTE]\n> > Body";
+    let editor = model(source);
+    assert_eq!(callout_of(&editor, 0), None);
+    let inner = editor.document().root().children().next().unwrap();
+    let inner = inner.children().next().unwrap();
+    assert_eq!(inner.kind(), BlockKind::Blockquote { callout: None });
+    assert_eq!(editor.source(), source);
+}
+
+#[test]
+fn callout_starting_with_an_empty_list_item_keeps_the_blank_line() {
+    // `> - ` straight after the marker line would read back as a setext
+    // underline, turning the callout into a heading in a plain quote.
+    for source in ["> [!NOTE]\n>\n> -", "> [!NOTE]\n>\n> 1."] {
+        let editor = model(source);
+        assert_eq!(callout_of(&editor, 0), Some(CalloutKind::Note), "{source}");
+        let saved = editor.source();
+        let reloaded = model(&saved);
+        assert_eq!(
+            callout_of(&reloaded, 0),
+            Some(CalloutKind::Note),
+            "{source} saved as {saved:?}"
+        );
+        assert_eq!(reloaded.source(), saved);
+    }
+}
+
+#[test]
+fn escaped_callout_marker_stays_escaped_on_save() {
+    for source in [
+        "> \\[!NOTE]\n> Body",
+        "> \\[!NOTE]",
+        "> \\[!note]",
+        "> \\[!WARNING]\n>\n> Body",
+    ] {
+        assert_eq!(model(source).source(), source);
+        assert_eq!(callout_of(&model(source), 0), None, "{source:?}");
+    }
+}

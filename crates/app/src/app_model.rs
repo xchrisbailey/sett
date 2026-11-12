@@ -44,6 +44,9 @@ pub struct AppModel {
     selections: HashMap<Space, Selection>,
     /// The Item open in each Space, reopened when switching back to it.
     open_items: HashMap<Space, ItemId>,
+    /// A heading to put the caret at once the editor shows this Item, set by
+    /// following `[[slug#Heading]]`.
+    reveal: Option<(ItemId, String)>,
     /// `None` when the data root isn't watched, or watching it failed.
     watching: Option<Watching>,
 }
@@ -64,7 +67,9 @@ impl AppModel {
         settings_path: Option<PathBuf>,
         cx: &mut App,
     ) -> io::Result<Entity<AppModel>> {
-        AppModel::open_with(settings, settings_path, true, cx)
+        let model = AppModel::open_with(settings, settings_path, true, cx)?;
+        model.update(cx, |m, _| m.store.use_system_trash());
+        Ok(model)
     }
 
     /// Like [`AppModel::open`] but without watching the data root, for when
@@ -97,6 +102,7 @@ impl AppModel {
                 index,
                 selections: HashMap::new(),
                 open_items: HashMap::new(),
+                reveal: None,
                 watching,
             }
         }))
@@ -139,10 +145,28 @@ impl AppModel {
     /// Selects where an Item of the active Space lives and asks the view
     /// there to open it, as following a Link does.
     pub fn open_item(&mut self, item: ItemId, cx: &mut Context<Self>) {
+        self.open_item_at(item, None, cx);
+    }
+
+    /// Like [`AppModel::open_item`], and once the editor shows the Item it puts
+    /// the caret at the first heading called `heading`, if there is one.
+    pub fn open_item_at(&mut self, item: ItemId, heading: Option<String>, cx: &mut Context<Self>) {
+        self.reveal = heading.map(|heading| (item.clone(), heading));
         self.selections.insert(self.space(), selection_of(&item));
         self.open_items.insert(self.space(), item.clone());
         cx.emit(AppModelEvent::OpenItem(item));
         cx.notify();
+    }
+
+    /// The heading asked for by [`AppModel::open_item_at`] for `item`, once.
+    pub(crate) fn take_reveal(&mut self, item: &ItemId) -> Option<String> {
+        match self.reveal.take() {
+            Some((target, heading)) if &target == item => Some(heading),
+            other => {
+                self.reveal = other;
+                None
+            }
+        }
     }
 
     pub fn switch_space(&mut self, space: Space, cx: &mut Context<Self>) {

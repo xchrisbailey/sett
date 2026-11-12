@@ -1,3 +1,4 @@
+mod chips;
 mod commands;
 mod host;
 mod projection;
@@ -5,6 +6,7 @@ mod props;
 mod repro;
 mod round_trip;
 mod undo;
+// FORK: the GPUI view tests need gpui-kit test-support, which we drop.
 #[cfg(feature = "view-tests")]
 mod view;
 

@@ -73,6 +73,9 @@ fn wiki_links_stay_verbatim() {
     assert_round_trips("Linked [[snake_case note]] and [[R&D]].\n");
     // Inside a table an unescaped `|` would split the cell.
     assert_round_trips("| Note |\n| --- |\n| [[target\\|label]] |\n");
+    // Links that draw as chips: heading and label, in marks, in a cell.
+    assert_round_trips("Go to [[budget#Quotes|the quotes]] and **[[budget]]** now.\n");
+    assert_round_trips("| A | B |\n| --- | --- |\n| [[x#h]] | [[y\\|z]] |\n");
 }
 
 #[test]

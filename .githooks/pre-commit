@@ -6,6 +6,18 @@ set -euo pipefail
 # Rejects conflict markers and whitespace errors in what's being committed.
 git diff --cached --check
 
+# The repo has no submodules, so a staged gitlink is an agent worktree
+# (.claude/worktrees/) picked up by `git add -A`.
+if git diff --cached --raw | grep -q ' 160000 '; then
+    echo "pre-commit: a gitlink is staged; unstage it with git rm --cached:" >&2
+    git diff --cached --raw | grep ' 160000 ' >&2
+    exit 1
+fi
+
+if git diff --cached --name-only | grep -q '^crates/markdown-editor/'; then
+    scripts/check-fork-markers
+fi
+
 if git diff --cached --name-only | grep -q '\.rs$'; then
     cargo fmt --all --check
 fi

@@ -15,7 +15,7 @@ Imports: `use gpui_kit::*;` gives GPUI. `gpui_kit::component` re-exports `h_flex
 ## Testing gotchas
 
 - **A real file watcher breaks UI tests.** Its thread wakes GPUI's test executor, and the test fails. Build the model with `AppModel::open_unwatched` and feed changes in through `AppModel::apply_change`. The watcher itself is tested in `crates/store/tests/watcher.rs`.
-- **Never touch the real Trash in tests.** Swap it out with `Store::set_trash` or `AppModel::set_trash`.
+- **Tests that trash set their own Trash** with `Store::set_trash` or `AppModel::set_trash`. Only `AppModel::open` turns on the real macOS Trash; without either, trashing fails.
 - **Shared UI helpers** live in `crates/app/tests/common/mod.rs`: `open_shell`, `click_label`, `right_click_label`, `find_label`.
 - **`test-support`** is enabled on gpui-kit only for `crates/app` (dev-dependency). Turning it on forced `taffy` down to 0.15 and `unicode-properties` down to 0.1.3 in the lockfile. The forked editor's own view tests sit behind its `view-tests` feature because `test-support` doesn't resolve there.
 - **Looking at the UI:** `scripts/screenshot` captures the real window against fixture data. Read the PNG to check layout yourself.

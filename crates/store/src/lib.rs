@@ -133,7 +133,14 @@ impl Store {
         let store = Store {
             root: root.into(),
             log: WriteLog::default(),
-            trash: Arc::new(|path| trash::delete(path).map_err(io::Error::other)),
+            // Tests must never reach the real Trash, so it's opt-in: the app
+            // calls `use_system_trash`, and tests that trash call `set_trash`.
+            trash: Arc::new(|path| {
+                Err(io::Error::other(format!(
+                    "no Trash set for {}: call Store::use_system_trash or Store::set_trash",
+                    path.display()
+                )))
+            }),
         };
         if !store.root.exists() {
             store.first_run()?;
@@ -145,8 +152,14 @@ impl Store {
         &self.root
     }
 
-    /// Replaces how `trash_*` disposes of files, which by default moves them
-    /// to the macOS Trash. Tests use this to keep the real Trash untouched.
+    /// Makes `trash_*` move files to the macOS Trash. Until this or
+    /// [`Store::set_trash`] is called, trashing fails.
+    pub fn use_system_trash(&mut self) {
+        self.set_trash(|path| trash::delete(path).map_err(io::Error::other));
+    }
+
+    /// Replaces how `trash_*` disposes of files. Tests use this to keep the
+    /// real Trash untouched.
     pub fn set_trash(&mut self, trash: impl Fn(&Path) -> io::Result<()> + Send + Sync + 'static) {
         self.trash = Arc::new(trash);
     }
@@ -187,7 +200,10 @@ impl Store {
         let dir = self.project_dir(space, project).join("tasks");
         let mut tasks: Vec<Task> = markdown_files(&dir)
             .into_iter()
-            .map(|(slug, doc)| Task::from_doc(space, project, &slug, doc))
+            .map(|(slug, doc)| {
+                Task::from_doc(space, project, &slug, doc)
+                    .with_modified(modified(&dir.join(md(&slug))))
+            })
             .collect();
         tasks.sort_by(task_order);
         tasks
@@ -212,7 +228,7 @@ impl Store {
             .project_dir(space, project)
             .join("tasks")
             .join(md(slug));
-        Some(Task::from_doc(space, project, slug, read_doc(&path)?))
+        Some(Task::from_doc(space, project, slug, read_doc(&path)?).with_modified(modified(&path)))
     }
 
     pub fn note(&self, space: Space, project: Option<&str>, slug: &str) -> Option<Note> {
@@ -220,14 +236,12 @@ impl Store {
             return None;
         }
         let path = self.notes_dir(space, project).join(md(slug));
-        let mut note = Note::from_doc(space, project, slug, read_doc(&path)?);
-        note.modified = modified(&path);
-        Some(note)
+        Some(Note::from_doc(space, project, slug, read_doc(&path)?).with_modified(modified(&path)))
     }
 
     pub fn journal_entry(&self, space: Space, date: Date) -> Option<JournalEntry> {
         let path = self.journal_dir(space).join(md(&date.to_string()));
-        Some(JournalEntry::from_doc(space, date, read_doc(&path)?))
+        Some(JournalEntry::from_doc(space, date, read_doc(&path)?).with_modified(modified(&path)))
     }
 
     /// Space-level Notes when `project` is `None`, otherwise that Project's.
@@ -236,9 +250,8 @@ impl Store {
         markdown_files(&dir)
             .into_iter()
             .map(|(slug, doc)| {
-                let mut note = Note::from_doc(space, project, &slug, doc);
-                note.modified = modified(&dir.join(md(&slug)));
-                note
+                Note::from_doc(space, project, &slug, doc)
+                    .with_modified(modified(&dir.join(md(&slug))))
             })
             .collect()
     }
@@ -246,9 +259,15 @@ impl Store {
     /// Journal Entries sorted by date. Files whose name isn't a valid
     /// `YYYY-MM-DD` date are skipped.
     pub fn journal(&self, space: Space) -> Vec<JournalEntry> {
-        let mut entries: Vec<JournalEntry> = markdown_files(&self.journal_dir(space))
+        let dir = self.journal_dir(space);
+        let mut entries: Vec<JournalEntry> = markdown_files(&dir)
             .into_iter()
-            .filter_map(|(stem, doc)| Some(JournalEntry::from_doc(space, Date::parse(&stem)?, doc)))
+            .filter_map(|(stem, doc)| {
+                Some(
+                    JournalEntry::from_doc(space, Date::parse(&stem)?, doc)
+                        .with_modified(modified(&dir.join(md(&stem)))),
+                )
+            })
             .collect();
         entries.sort_by_key(|e| e.date);
         entries
@@ -346,6 +365,7 @@ impl Store {
         let dir = self.project_dir(task.space, &task.project).join("tasks");
         self.write_new(&dir, &task.slug, task.to_doc())?;
         task.fields = task.to_doc().fields;
+        task.modified = modified(&dir.join(md(&task.slug)));
         Ok(task)
     }
 
@@ -429,8 +449,10 @@ impl Store {
         check_slug(&task.slug)?;
         let dir = self.project_dir(task.space, &task.project).join("tasks");
         let doc = task.to_doc();
-        self.write_doc(&dir.join(md(&task.slug)), &doc)?;
+        let path = dir.join(md(&task.slug));
+        self.write_doc(&path, &doc)?;
         task.fields = doc.fields;
+        task.modified = modified(&path);
         Ok(())
     }
 
@@ -450,8 +472,10 @@ impl Store {
 
     pub fn save_journal_entry(&self, entry: &mut JournalEntry) -> io::Result<()> {
         let doc = entry.to_doc();
-        self.write_doc(&self.journal_path(entry), &doc)?;
+        let path = self.journal_path(entry);
+        self.write_doc(&path, &doc)?;
         entry.fields = doc.fields;
+        entry.modified = modified(&path);
         Ok(())
     }
 

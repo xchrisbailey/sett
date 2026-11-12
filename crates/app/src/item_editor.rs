@@ -1,4 +1,5 @@
 use std::io;
+use std::sync::Arc;
 use std::time::Duration;
 
 use gpui_kit::component::input::{Editor, EditorState, Input, InputEvent, InputState};
@@ -11,7 +12,7 @@ use gpui_kit::{
     div, prelude::FluentBuilder as _,
 };
 use markdown_editor::{BlockEditor, BlockEditorEvent, BlockEditorState};
-use sett_store::{Date, EditorMode, JournalEntry, Note, Space};
+use sett_store::{Date, EditorMode, JournalEntry, LinkTarget, Note, Space};
 
 use crate::app_model::AppModel;
 use crate::dates::to_chrono;
@@ -148,12 +149,25 @@ impl ItemEditor {
                 .soft_wrap(true)
         });
         let subscriptions = vec![
-            cx.subscribe_in(&block, window, |this, block, event, window, cx| {
-                if let BlockEditorEvent::Changed { .. } = event {
-                    this.body = block.read(cx).source();
-                    this.edited(window, cx);
-                }
-            }),
+            cx.subscribe_in(
+                &block,
+                window,
+                |this, block, event, window, cx| match event {
+                    BlockEditorEvent::Changed { .. } => {
+                        this.body = block.read(cx).source();
+                        // A Link may have been typed or deleted.
+                        this.refresh_link_data(cx);
+                        this.edited(window, cx);
+                    }
+                    BlockEditorEvent::WikiLinkClicked { slug, heading } => {
+                        this.follow_link(slug, heading.as_deref(), window, cx);
+                    }
+                    BlockEditorEvent::CreateLinkTargetRequested { title } => {
+                        this.create_link_target(title, block, window, cx);
+                    }
+                    _ => {}
+                },
+            ),
             cx.subscribe_in(&raw, window, |this, raw, event: &InputEvent, window, cx| {
                 if let InputEvent::Change = event {
                     this.body = raw.read(cx).value().to_string();
@@ -211,6 +225,7 @@ impl ItemEditor {
     /// Entry without a file opens empty and stays in memory until typed in.
     pub(crate) fn open(&mut self, item: ItemRef, window: &mut Window, cx: &mut Context<Self>) {
         if self.item.as_ref() == Some(&item) {
+            self.apply_reveal(window, cx);
             return;
         }
         self.flush(window, cx);
@@ -221,6 +236,54 @@ impl ItemEditor {
             Some(base) => self.show(disk, base, window, cx),
             None => self.close(cx),
         }
+        self.apply_reveal(window, cx);
+    }
+
+    /// Follows a Link chip in the body: opens the Item its slug names (a
+    /// broken Link does nothing), then goes to `heading` if it has one. A
+    /// Link to the open Item only goes to the heading.
+    fn follow_link(
+        &mut self,
+        slug: &str,
+        heading: Option<&str>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let LinkTarget::Found { item, .. } = self.model.read(cx).index().resolve(slug) else {
+            return;
+        };
+        if self.item.as_ref().map(ItemRef::id) == Some(item.clone()) {
+            if let Some(heading) = heading {
+                self.reveal_heading(heading, window, cx);
+            }
+            return;
+        }
+        let heading = heading.map(str::to_string);
+        self.model
+            .update(cx, |model, cx| model.open_item_at(item, heading, cx));
+    }
+
+    /// Goes to the heading a followed Link asked for in the Item just opened.
+    fn apply_reveal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(item) = self.item.as_ref().map(ItemRef::id) else {
+            return;
+        };
+        if let Some(heading) = self.model.update(cx, |model, _| model.take_reveal(&item)) {
+            self.reveal_heading(&heading, window, cx);
+        }
+    }
+
+    /// Puts the caret at the start of the first heading called `heading` and
+    /// scrolls to it. Without a match the caret and scroll stay where they are.
+    fn reveal_heading(&mut self, heading: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if self.mode != EditorMode::Block {
+            return;
+        }
+        self.block.update(cx, |block, cx| {
+            if block.reveal_heading(heading, cx) {
+                block.focus(window, cx);
+            }
+        });
     }
 
     /// Focuses the title with its text selected, for a Note just created.
@@ -322,6 +385,8 @@ impl ItemEditor {
             return;
         }
         let mode = model.editor_mode();
+        // Another Item may have been renamed, added or removed.
+        self.refresh_link_data(cx);
         if mode != self.mode {
             self.set_mode(mode, window, cx);
         }
@@ -414,6 +479,54 @@ impl ItemEditor {
         cx.notify();
     }
 
+    /// Creates the Note the Link Picker's last row offered, in the open
+    /// Item's Project (none for a Space-level Note or a Journal Entry), and
+    /// links to it. A failure is shown and leaves the typed text as it was.
+    fn create_link_target(
+        &mut self,
+        title: &str,
+        block: &Entity<BlockEditorState>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let project = match &self.item {
+            Some(ItemRef::Note { project, .. }) => project.clone(),
+            Some(ItemRef::Task { project, .. }) => Some(project.clone()),
+            Some(ItemRef::Journal { .. }) | None => None,
+        };
+        let created = self
+            .model
+            .update(cx, |w, cx| w.create_note(project.as_deref(), title, cx));
+        match created {
+            Ok(slug) => {
+                block.update(cx, |block, cx| block.complete_link_pick(&slug, cx));
+                // The new Note's chip shows its title straight away.
+                self.refresh_link_data(cx);
+            }
+            Err(err) => window.push_notification(
+                Notification::error(format!("Couldn\u{2019}t create the Note. {err}.")),
+                cx,
+            ),
+        }
+    }
+
+    /// Tells the block editor what its Links point at (so chips show titles
+    /// and states) and which Items the Link Picker offers. The editor
+    /// repaints only when the answer differs from the last one.
+    fn refresh_link_data(&self, cx: &mut Context<Self>) {
+        let Some(item) = self.item.as_ref().map(ItemRef::id) else {
+            return;
+        };
+        let model = self.model.clone();
+        self.block.update(cx, |block, cx| {
+            let index = model.read(cx).index();
+            let directory = crate::link_data::wiki_link_directory(index, block.wiki_link_slugs());
+            let candidates = crate::link_data::link_candidates(index, &item);
+            block.set_wiki_links(Arc::new(directory), cx);
+            block.set_link_candidates(candidates, cx);
+        });
+    }
+
     fn set_mode(&mut self, mode: EditorMode, window: &mut Window, cx: &mut Context<Self>) {
         let focused = self.active_focus_handle(cx).contains_focused(window, cx);
         self.mode = mode;
@@ -443,6 +556,7 @@ impl ItemEditor {
                 if let Err(err) = result {
                     eprintln!("sett: couldn't show the block view: {err}");
                 }
+                self.refresh_link_data(cx);
             }
             EditorMode::Raw => self
                 .raw
