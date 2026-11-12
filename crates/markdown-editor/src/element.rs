@@ -116,6 +116,12 @@ impl RenderOnce for BlockEditor {
                         }
                         _ => range,
                     };
+                    // FORK: model bytes to the renderer's, widened to whole
+                    // chips.
+                    let range = match snapshot.chips.get(&block) {
+                        Some(chips) => chips.range_to_rendered(range),
+                        None => range,
+                    };
                     backgrounds
                         .entry(block.as_u64())
                         .or_default()

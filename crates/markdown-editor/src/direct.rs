@@ -4,7 +4,7 @@
 //! Every text leaf (paragraph, heading, code block, table cell) gets its
 //! `BlockId` as `editor_key`.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, ops::Range};
 
 use super::{
     document::{AtomData, BlockContent, EditorDocument},
@@ -13,12 +13,20 @@ use super::{
     kind::BlockKindData,
 };
 use gpui_kit::base::text::editor_host::{
-    BlockNode, BlockState, CodeBlock, InlineNode, Paragraph, Span, Table,
+    BlockNode, BlockState, CodeBlock, InlineNode, Paragraph, Span, Table, TextMark,
 };
 
-/// A paragraph holding `inline`, keyed by `id`.
-pub(crate) fn paragraph(inline: &InlineText, id: BlockId, placeholders: bool) -> Paragraph {
+/// A paragraph holding `inline`, keyed by `id`. `open` holds the Link spans
+/// shown as source; every other Link span is drawn as a chip.
+pub(crate) fn paragraph(
+    inline: &InlineText,
+    id: BlockId,
+    placeholders: bool,
+    open: &[Range<usize>],
+) -> Paragraph {
     let mut paragraph = Paragraph::default();
+    // FORK: Links as chips. The text is cut at the Link spans.
+    let spans = super::wiki_chip::chip_spans(inline);
     for (range, mark, atom) in inline.pieces() {
         match atom {
             Some(InlineAtom::Image(image)) if placeholders => {
@@ -31,10 +39,41 @@ pub(crate) fn paragraph(inline: &InlineText, id: BlockId, placeholders: bool) ->
                 paragraph.push(node.marks(vec![(0..len, mark.clone())]));
             }
             None => {
-                let text = &inline.text()[range];
-                paragraph.push(
-                    InlineNode::new(text.to_string()).marks(vec![(0..text.len(), mark.clone())]),
-                );
+                let mut at = range.start;
+                let push_text = |paragraph: &mut Paragraph, range: Range<usize>| {
+                    let text = &inline.text()[range];
+                    if !text.is_empty() {
+                        paragraph.push(
+                            InlineNode::new(text.to_string())
+                                .marks(vec![(0..text.len(), mark.clone())]),
+                        );
+                    }
+                };
+                for span in spans
+                    .iter()
+                    .filter(|s| range.start <= s.start && s.end <= range.end)
+                {
+                    push_text(&mut paragraph, at..span.start);
+                    let source = &inline.text()[span.clone()];
+                    if open.contains(span) {
+                        // FORK: an open Link is inline code, in the
+                        // projection only.
+                        let mark = TextMark {
+                            code: true,
+                            ..mark.clone()
+                        };
+                        paragraph.push(
+                            InlineNode::new(source.to_string())
+                                .marks(vec![(0..source.len(), mark)]),
+                        );
+                    } else {
+                        let chip = super::wiki_chip::chip_node(source);
+                        let len = chip.text().len();
+                        paragraph.push(chip.marks(vec![(0..len, mark.clone())]));
+                    }
+                    at = span.end;
+                }
+                push_text(&mut paragraph, at..range.end);
             }
         }
     }
@@ -73,6 +112,8 @@ pub(crate) struct NodeCache {
     /// Present image atoms as text placeholders: nothing is resolved,
     /// decoded or loaded (`ImagePolicy::Placeholder`).
     pub(crate) placeholders: bool,
+    /// FORK: the Link spans shown as source, by leaf.
+    open: super::wiki_chip::OpenSpans,
     nodes: HashMap<BlockId, (u64, BlockNode)>,
     rows: HashMap<BlockId, (u64, Vec<Paragraph>)>,
     /// Nodes and rows built (not reused), for the perf tests (D9).
@@ -92,6 +133,37 @@ impl NodeCache {
     pub(crate) fn clear(&mut self) {
         self.nodes.clear();
         self.rows.clear();
+    }
+
+    /// FORK: the open Link spans of `leaf`.
+    pub(crate) fn open_of(&self, leaf: BlockId) -> Vec<Range<usize>> {
+        self.open.of(leaf)
+    }
+
+    /// FORK: show these Link spans as source. Drops the cached projection of
+    /// the leaves that opened or closed and their ancestors, and returns
+    /// those blocks.
+    pub(crate) fn set_open(
+        &mut self,
+        doc: &EditorDocument,
+        open: super::wiki_chip::OpenSpans,
+    ) -> Vec<BlockId> {
+        if self.open == open {
+            return Vec::new();
+        }
+        let old = std::mem::replace(&mut self.open, open);
+        let mut dirty: Vec<BlockId> = old
+            .leaves()
+            .chain(self.open.leaves())
+            .flat_map(|leaf| doc.path(leaf))
+            .collect();
+        dirty.sort_by_key(|id| id.as_u64());
+        dirty.dedup();
+        for id in &dirty {
+            self.nodes.remove(id);
+            self.rows.remove(id);
+        }
+        dirty
     }
 
     pub(crate) fn node(&mut self, doc: &EditorDocument, id: BlockId) -> Option<BlockNode> {
@@ -118,8 +190,10 @@ impl NodeCache {
                     .children(id)
                     .iter()
                     .map(|cell| match doc.inline(*cell) {
-                        Some(inline) => paragraph(inline, *cell, self.placeholders),
-                        None => paragraph(&InlineText::new(), *cell, self.placeholders),
+                        Some(inline) => {
+                            paragraph(inline, *cell, self.placeholders, &self.open.of(*cell))
+                        }
+                        None => paragraph(&InlineText::new(), *cell, self.placeholders, &[]),
                     })
                     .collect();
                 self.rows.insert(id, (revision, row.clone()));
@@ -136,9 +210,10 @@ impl NodeCache {
                 .filter_map(|child| this.node(doc, *child))
                 .collect()
         };
+        let open = self.open.of(id);
         let inline = || match &entry.content {
-            BlockContent::Inline(inline) => paragraph(inline, id, self.placeholders),
-            _ => paragraph(&InlineText::new(), id, self.placeholders),
+            BlockContent::Inline(inline) => paragraph(inline, id, self.placeholders, &open),
+            _ => paragraph(&InlineText::new(), id, self.placeholders, &[]),
         };
         Some(match &entry.kind {
             BlockKindData::Root => BlockNode::Root {
