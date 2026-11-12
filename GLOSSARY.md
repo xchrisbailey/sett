@@ -56,6 +56,14 @@ _Avoid_: Mention, autocomplete, quick switcher
 A highlighted box in an Item's body that marks its content as a note, tip, important point, warning or caution.
 _Avoid_: Alert, admonition, surface
 
+**Code Block**:
+A block in an Item's body that holds code exactly as written, optionally tagged with the language it is written in.
+_Avoid_: Snippet, fence, pre
+
+**Language Menu**:
+The list of languages that opens from a Code Block's language label. Choosing one sets the language the block is tagged with.
+_Avoid_: Language picker, language dropdown
+
 **Insert Menu**:
 The list of block types that opens when the user types `/` at the start of an empty block in an Item's body. Choosing one turns that block into the chosen type.
 _Avoid_: Slash menu, command palette, block picker
