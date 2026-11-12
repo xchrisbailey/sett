@@ -31,7 +31,7 @@ impl Row<'_> {
     fn label(&self) -> String {
         match self {
             Row::Plain => "Plain text".to_string(),
-            Row::Language((display, ..)) => (*display).to_string(),
+            Row::Language(entry) => entry.display.to_string(),
             Row::Use(query) => format!("Use \"{query}\""),
         }
     }
@@ -40,7 +40,7 @@ impl Row<'_> {
     fn lang(&self) -> Option<String> {
         match self {
             Row::Plain => None,
-            Row::Language((_, fence, _)) => Some((*fence).to_string()),
+            Row::Language(entry) => Some(entry.fence.to_string()),
             Row::Use(query) => Some((*query).to_string()),
         }
     }
@@ -51,9 +51,9 @@ impl Row<'_> {
         let lang = lang.filter(|l| !l.is_empty());
         match (self, lang) {
             (Row::Plain, None) => true,
-            (Row::Language((_, fence, aliases)), Some(lang)) => {
-                fence.eq_ignore_ascii_case(lang)
-                    || aliases.iter().any(|a| a.eq_ignore_ascii_case(lang))
+            (Row::Language(entry), Some(lang)) => {
+                entry.fence.eq_ignore_ascii_case(lang)
+                    || entry.aliases.iter().any(|a| a.eq_ignore_ascii_case(lang))
             }
             _ => false,
         }
@@ -73,16 +73,16 @@ pub(crate) fn rows(query: &str) -> Vec<Row<'_>> {
     rows.extend(
         CODE_BLOCK_LANGUAGES
             .iter()
-            .filter(|(display, fence, aliases)| {
-                display.to_lowercase().contains(&needle)
-                    || fence.contains(&needle)
-                    || aliases.iter().any(|a| a.contains(&needle))
+            .filter(|e| {
+                e.display.to_lowercase().contains(&needle)
+                    || e.fence.contains(&needle)
+                    || e.aliases.iter().any(|a| a.contains(&needle))
             })
             .map(Row::Language),
     );
-    let named = CODE_BLOCK_LANGUAGES.iter().any(|(display, fence, _)| {
-        display.eq_ignore_ascii_case(query) || fence.eq_ignore_ascii_case(query)
-    });
+    let named = CODE_BLOCK_LANGUAGES
+        .iter()
+        .any(|e| e.display.eq_ignore_ascii_case(query) || e.fence.eq_ignore_ascii_case(query));
     if !query.is_empty() && !query.contains(char::is_whitespace) && !named {
         rows.push(Row::Use(query));
     }

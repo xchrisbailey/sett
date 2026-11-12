@@ -5,46 +5,64 @@ use std::sync::LazyLock;
 use syntect::parsing::{SyntaxReference, SyntaxSet};
 
 /// One row of the Language Menu: display name, fence name, and extra names that find it.
-pub type LanguageEntry = (&'static str, &'static str, &'static [&'static str]);
+#[derive(Debug, PartialEq, Eq)]
+pub struct LanguageEntry {
+    pub display: &'static str,
+    pub fence: &'static str,
+    pub aliases: &'static [&'static str],
+}
+
+const fn entry(
+    display: &'static str,
+    fence: &'static str,
+    aliases: &'static [&'static str],
+) -> LanguageEntry {
+    LanguageEntry {
+        display,
+        fence,
+        aliases,
+    }
+}
 
 /// The languages the Language Menu offers. `shell` is an alias for searching only;
 /// it doesn't highlight.
 pub const CODE_BLOCK_LANGUAGES: &[LanguageEntry] = &[
-    ("Bash", "bash", &["sh", "zsh", "shell"]),
-    ("C", "c", &[]),
-    ("C++", "cpp", &["c++"]),
-    ("C#", "csharp", &["cs"]),
-    ("CSS", "css", &["scss"]),
-    ("Diff", "diff", &["patch"]),
-    ("Dockerfile", "dockerfile", &[]),
-    ("Go", "go", &[]),
-    ("HTML", "html", &[]),
-    ("Java", "java", &[]),
-    ("JavaScript", "javascript", &["js"]),
-    ("JSON", "json", &["jsonc"]),
-    ("Kotlin", "kotlin", &["kt"]),
-    ("Lua", "lua", &[]),
-    ("Markdown", "markdown", &["md"]),
-    ("PHP", "php", &[]),
-    ("Python", "python", &["py"]),
-    ("Ruby", "ruby", &["rb"]),
-    ("Rust", "rust", &["rs"]),
-    ("SQL", "sql", &[]),
-    ("Swift", "swift", &[]),
-    ("TOML", "toml", &[]),
-    ("TypeScript", "typescript", &["ts"]),
-    ("YAML", "yaml", &["yml"]),
-    ("Zig", "zig", &[]),
+    entry("Bash", "bash", &["sh", "zsh", "shell"]),
+    entry("C", "c", &[]),
+    entry("C++", "cpp", &["c++"]),
+    entry("C#", "csharp", &["cs"]),
+    entry("CSS", "css", &["scss"]),
+    entry("Diff", "diff", &["patch"]),
+    entry("Dockerfile", "dockerfile", &[]),
+    entry("Go", "go", &[]),
+    entry("HTML", "html", &[]),
+    entry("Java", "java", &[]),
+    entry("JavaScript", "javascript", &["js"]),
+    entry("JSON", "json", &["jsonc"]),
+    entry("Kotlin", "kotlin", &["kt"]),
+    entry("Lua", "lua", &[]),
+    entry("Markdown", "markdown", &["md"]),
+    entry("PHP", "php", &[]),
+    entry("Python", "python", &["py"]),
+    entry("Ruby", "ruby", &["rb"]),
+    entry("Rust", "rust", &["rs"]),
+    entry("SQL", "sql", &[]),
+    entry("Swift", "swift", &[]),
+    entry("TOML", "toml", &[]),
+    entry("TypeScript", "typescript", &["ts"]),
+    entry("YAML", "yaml", &["yml"]),
+    entry("Zig", "zig", &[]),
 ];
 
 /// The display name for a fence name or alias, ignoring case.
 pub fn display_name(lang: &str) -> Option<&'static str> {
     CODE_BLOCK_LANGUAGES
         .iter()
-        .find(|(_, fence, aliases)| {
-            fence.eq_ignore_ascii_case(lang) || aliases.iter().any(|a| a.eq_ignore_ascii_case(lang))
+        .find(|e| {
+            e.fence.eq_ignore_ascii_case(lang)
+                || e.aliases.iter().any(|a| a.eq_ignore_ascii_case(lang))
         })
-        .map(|(display, _, _)| *display)
+        .map(|e| e.display)
 }
 
 /// Whether a Code Block tagged `lang` gets syntax highlighting. Ignores case.
@@ -143,8 +161,13 @@ mod tests {
     #[test]
     fn curated_list_has_25_entries_and_every_fence_name_highlights() {
         assert_eq!(CODE_BLOCK_LANGUAGES.len(), 25);
-        for (display, fence, _) in CODE_BLOCK_LANGUAGES {
-            assert!(highlights(fence), "{display} ({fence}) should highlight");
+        for e in CODE_BLOCK_LANGUAGES {
+            assert!(
+                highlights(e.fence),
+                "{} ({}) should highlight",
+                e.display,
+                e.fence
+            );
         }
     }
 
