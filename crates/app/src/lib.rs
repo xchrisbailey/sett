@@ -21,8 +21,8 @@ pub use app_model::{AppModel, AppModelEvent, Selection};
 pub use board::BoardEvent;
 pub use icons::AppAssets;
 pub use shell::{
-    ArchiveProject, DeleteProject, EditProject, NewProject, Shell, ShowPersonal, ShowWork,
-    ToggleEditorMode, UnarchiveProject,
+    ArchiveProject, DeleteProject, EditProject, GoBack, GoForward, NewProject, Shell, ShowPersonal,
+    ShowWork, ToggleEditorMode, UnarchiveProject,
 };
 
 /// Registers the app's key bindings. Call after `gpui_kit::init` and before

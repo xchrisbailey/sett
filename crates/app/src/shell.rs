@@ -12,7 +12,10 @@ use crate::center::CenterPanel;
 use crate::nav::Nav;
 use crate::project_dialog;
 
-actions!(sett, [ShowPersonal, ShowWork, ToggleEditorMode]);
+actions!(
+    sett,
+    [ShowPersonal, ShowWork, ToggleEditorMode, GoBack, GoForward]
+);
 
 // The menu-bar route to the commands the nav's context menu offers. Each acts
 // on the selected Project and is only handled when it applies, which is what
@@ -36,6 +39,10 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("cmd-1", ShowPersonal, Some(CONTEXT)),
         KeyBinding::new("cmd-2", ShowWork, Some(CONTEXT)),
         KeyBinding::new("cmd-/", ToggleEditorMode, Some(CONTEXT)),
+        // No context: opening an Item can hide the view that had focus, and
+        // history navigation has to work from wherever focus lands.
+        KeyBinding::new("cmd-[", GoBack, None),
+        KeyBinding::new("cmd-]", GoForward, None),
     ]);
 }
 
@@ -52,6 +59,14 @@ impl Shell {
     pub fn new(model: Entity<AppModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let center = cx.new(|cx| CenterPanel::new(model.clone(), window, cx));
         let observe = cx.observe(&model, |_, _, cx| cx.notify());
+        let history = model.clone();
+        App::on_action(&mut *cx, move |_: &GoBack, cx| {
+            history.update(cx, |model, cx| model.go_back(cx))
+        });
+        let history = model.clone();
+        App::on_action(&mut *cx, move |_: &GoForward, cx| {
+            history.update(cx, |model, cx| model.go_forward(cx))
+        });
         let focus_handle = cx.focus_handle();
         // The Space shortcuts live on the shell's key context, so it needs focus
         // for them to work before anything inside it has been clicked.
