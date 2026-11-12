@@ -48,6 +48,10 @@ _Avoid_: Status
 A reference from one item's body to another item in the same Space.
 _Avoid_: Reference, mention, backlink
 
+**Link Picker**:
+The list of Items that opens when the user types `[[` in an Item's body. Choosing one inserts a Link to it.
+_Avoid_: Mention, autocomplete, quick switcher
+
 **Callout**:
 A highlighted box in an Item's body that marks its content as a note, tip, important point, warning or caution.
 _Avoid_: Alert, admonition, surface

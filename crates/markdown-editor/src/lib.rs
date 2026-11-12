@@ -63,8 +63,13 @@ mod input_rule;
 // FORK: the Insert Menu.
 mod insert_menu;
 mod kind;
+// FORK: the Link Picker.
+mod link_picker;
 mod markdown_source;
 mod marks;
+// FORK: Links drawn as title chips.
+mod wiki_chip;
+mod wiki_link;
 // FORK: what the Insert Menu and the Callout type menu share.
 mod menu;
 mod order;
@@ -95,6 +100,7 @@ pub use element::BlockEditor;
 pub use gpui_kit::base::text::editor_host::ColumnAlign;
 pub use input_rule::InputRule;
 pub use insert_menu::InsertMenuOption;
+pub use link_picker::LinkCandidate;
 /// Shows or hides the optional toolbar. Unbound by default; bind it in the
 /// `"BlockEditor"` key context, e.g. `KeyBinding::new("cmd-shift-t", ToggleToolbar, Some("BlockEditor"))`.
 pub use state::ToggleToolbar;
@@ -102,6 +108,7 @@ pub use state::{BlockEditorEvent, BlockEditorState, ClipboardPolicy, PasteReques
 pub use style::BlockEditorStyle;
 pub use table::{TableEdit, TableLine};
 pub use toolbar::EditorToolbar;
+pub use wiki_link::{WikiLinkDirectory, WikiLinkInfo, WikiLinkState};
 
 /// Registers the editor's key bindings. Call once at startup, after `gpui_kit::init`.
 pub fn init(cx: &mut gpui::App) {

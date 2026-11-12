@@ -31,3 +31,6 @@ Thumbs.db
 # Agent local state (skills under .agents/ and .claude/skills/ stay tracked)
 .claude/settings.local.json
 .scratch/
+
+# Agent worktrees
+.claude/worktrees/

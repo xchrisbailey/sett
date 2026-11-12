@@ -116,6 +116,12 @@ impl RenderOnce for BlockEditor {
                         }
                         _ => range,
                     };
+                    // FORK: model bytes to the renderer's, widened to whole
+                    // chips.
+                    let range = match snapshot.chips.get(&block) {
+                        Some(chips) => chips.range_to_rendered(range),
+                        None => range,
+                    };
                     backgrounds
                         .entry(block.as_u64())
                         .or_default()
@@ -363,10 +369,23 @@ impl RenderOnce for BlockEditor {
                 CursorStyle::OpenHand
             } else if self.state.read(cx).pointer_hand {
                 CursorStyle::PointingHand
+            } else if self.state.read(cx).pointer_arrow {
+                // FORK: an arrow over a broken Link chip.
+                CursorStyle::Arrow
             } else {
                 CursorStyle::IBeam
             })
             .w_full()
+            // FORK: pressing or releasing Cmd/Ctrl over a Link chip changes
+            // how it looks without the pointer moving.
+            .on_modifiers_changed({
+                let state = self.state.clone();
+                move |event, window, cx| {
+                    let at = window.mouse_position();
+                    let held = secondary_modifier().is_subset_of(&event.modifiers);
+                    state.update(cx, |state, cx| state.hover_at(at, held, cx));
+                }
+            })
             .on_action(window.listener_for(s, BlockEditorState::on_backspace))
             .on_action(window.listener_for(s, BlockEditorState::on_delete))
             .on_action(window.listener_for(s, BlockEditorState::on_delete_word_left))
@@ -421,6 +440,11 @@ impl RenderOnce for BlockEditor {
             .on_action(window.listener_for(s, BlockEditorState::on_callout_menu_down))
             .on_action(window.listener_for(s, BlockEditorState::on_callout_menu_pick))
             .on_action(window.listener_for(s, BlockEditorState::on_callout_menu_close))
+            .on_action(window.listener_for(s, BlockEditorState::on_follow_wiki_link))
+            .on_action(window.listener_for(s, BlockEditorState::on_link_picker_up))
+            .on_action(window.listener_for(s, BlockEditorState::on_link_picker_down))
+            .on_action(window.listener_for(s, BlockEditorState::on_link_picker_pick))
+            .on_action(window.listener_for(s, BlockEditorState::on_link_picker_close))
             .on_action(window.listener_for(s, BlockEditorState::on_toggle_bold))
             .on_action(window.listener_for(s, BlockEditorState::on_toggle_toolbar))
             .on_action(window.listener_for(s, BlockEditorState::on_toggle_italic))
@@ -437,6 +461,7 @@ impl RenderOnce for BlockEditor {
             // FORK: the Insert Menu and Callout type menu popovers.
             .children(super::insert_menu::render(&self.state, cx))
             .children(super::callout_menu::render(&self.state, cx))
+            .children(super::link_picker::render(&self.state, cx))
             .child(EditorRoot {
                 state: self.state.clone(),
                 child: Some(
@@ -862,7 +887,9 @@ impl Element for EditorRoot {
                 let focus = state.focus_handle.clone();
                 window.focus(&focus, cx);
                 if secondary_modifier().is_subset_of(&event.modifiers)
-                    && state.follow_link_at(event.position, cx)
+                    && (state.follow_link_at(event.position, cx)
+                        // FORK: a Link chip follows too.
+                        || state.follow_wiki_link_at(event.position, cx))
                 {
                     return;
                 }
@@ -873,6 +900,14 @@ impl Element for EditorRoot {
                 state.mouse_at(event.position, event.modifiers.shift, cx);
                 if !event.modifiers.shift && event.click_count >= 2 {
                     state.select_unit(event.click_count >= 3, cx);
+                }
+                // FORK: a plain single click on a Link chip opens it on
+                // release.
+                if !event.modifiers.shift
+                    && event.click_count == 1
+                    && !secondary_modifier().is_subset_of(&event.modifiers)
+                {
+                    state.press_chip(event.position);
                 }
             });
         });
@@ -908,6 +943,8 @@ impl Element for EditorRoot {
             if phase == DispatchPhase::Bubble {
                 entity.update(cx, |state, cx| {
                     state.dragging = false;
+                    // FORK: a plain click on a Link chip opens it.
+                    state.release_chip(cx);
                     state.finish_block_drag(cx);
                 });
             }

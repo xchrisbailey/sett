@@ -79,17 +79,23 @@ impl RenderOnce for ItemLinks {
     }
 }
 
-fn item_row(index: &SpaceIndex, item: ItemId, ambiguous: bool) -> Row {
-    let kind = match &item {
+/// What an Item is, for a muted label: "Task · Kitchen reno", "Note",
+/// "Journal".
+pub(crate) fn kind_label(index: &SpaceIndex, item: &ItemId) -> String {
+    match item {
         ItemId::Note { project: None, .. } => "Note".to_string(),
         ItemId::Note {
             project: Some(p), ..
         } => format!("Note \u{b7} {}", project_name(index, p)),
         ItemId::Task { project, .. } => format!("Task \u{b7} {}", project_name(index, project)),
         ItemId::Journal(_) => "Journal".to_string(),
-    };
+    }
+}
+
+fn item_row(index: &SpaceIndex, item: ItemId, ambiguous: bool) -> Row {
+    let kind = kind_label(index, &item);
     Row::Item {
-        title: index.title(&item).unwrap_or_else(|| item.slug()).into(),
+        title: index.title_or_slug(&item).into(),
         kind: kind.into(),
         item,
         ambiguous,

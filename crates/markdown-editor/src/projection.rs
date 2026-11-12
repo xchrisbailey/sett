@@ -14,7 +14,9 @@ use super::{
     direct::NodeCache,
     document::{BlockContent, EditorDocument},
     id::BlockId,
+    inline::InlineText,
     kind::BlockKindData,
+    wiki_chip::{ChipMap, OpenSpans, chip_spans},
 };
 use gpui_kit::base::text::editor_host::BlockNode;
 
@@ -26,13 +28,16 @@ pub(crate) struct ProjectedBlock {
 }
 
 /// Geometry facts the frame needs about a caret leaf.
-#[derive(Clone, Copy, Debug)]
+// FORK: no longer `Copy`, as it holds the chip map.
+#[derive(Clone, Debug)]
 pub(crate) struct LeafInfo {
     pub(crate) block: BlockId,
     /// Caret offsets are 0/1 (code blocks in the spike).
     pub(crate) atomic: bool,
     /// Model text length (bytes); for atomic leaves the rendered text length.
     pub(crate) len: usize,
+    /// FORK: the Link chips drawn in this leaf, if any.
+    pub(crate) chips: Option<Rc<ChipMap>>,
 }
 
 #[derive(Default)]
@@ -42,6 +47,8 @@ pub(crate) struct Snapshot {
     pub(crate) leaves: Rc<Vec<LeafInfo>>,
     /// Tables and their keyed cells, for node selection (no caret in cells).
     pub(crate) tables: Rc<Vec<(BlockId, Vec<BlockId>)>>,
+    /// FORK: the chip map of each leaf that has chips.
+    pub(crate) chips: Rc<HashMap<BlockId, Rc<ChipMap>>>,
 }
 
 #[derive(Default)]
@@ -55,7 +62,17 @@ pub(crate) struct ProjectionCache {
 }
 
 impl ProjectionCache {
-    pub(crate) fn snapshot(&mut self, doc: &EditorDocument) -> Rc<Snapshot> {
+    /// FORK: `open` holds the Link spans shown as source. A change of it
+    /// rebuilds the old and new leaves although the document did not change.
+    pub(crate) fn snapshot(&mut self, doc: &EditorDocument, open: OpenSpans) -> Rc<Snapshot> {
+        // FORK: leaves whose open spans changed are rebuilt.
+        let dirty = self.nodes.set_open(doc, open);
+        if !dirty.is_empty() {
+            for id in dirty {
+                self.by_id.remove(&id);
+            }
+            self.revision = None;
+        }
         if self.revision == Some(doc.revision) {
             return self.snapshot.clone();
         }
@@ -77,10 +94,11 @@ impl ProjectionCache {
             blocks.push(block);
         }
         self.nodes.collect_garbage(doc);
-        let leaves = doc
+        let leaves: Vec<LeafInfo> = doc
             .leaves()
             .iter()
-            .filter_map(|id| leaf_info(doc, *id))
+            // FORK: the open spans decide which Links are chips.
+            .filter_map(|id| leaf_info(doc, *id, &self.nodes.open_of(*id)))
             .collect();
         let mut tables: Vec<(BlockId, Vec<BlockId>)> = Vec::new();
         for id in doc.leaves() {
@@ -101,7 +119,12 @@ impl ProjectionCache {
             }
         }
         self.by_id = by_id;
+        let chips = leaves
+            .iter()
+            .filter_map(|leaf: &LeafInfo| Some((leaf.block, leaf.chips.clone()?)))
+            .collect();
         self.snapshot = Rc::new(Snapshot {
+            chips: Rc::new(chips),
             blocks,
             leaves: Rc::new(leaves),
             tables: Rc::new(tables),
@@ -131,19 +154,36 @@ impl ProjectionCache {
     }
 }
 
-fn leaf_info(doc: &EditorDocument, id: BlockId) -> Option<LeafInfo> {
+fn leaf_info(
+    doc: &EditorDocument,
+    id: BlockId,
+    // FORK: the leaf's open Link spans.
+    open: &[std::ops::Range<usize>],
+) -> Option<LeafInfo> {
     let entry = doc.get(id)?;
     match &entry.content {
         BlockContent::Inline(inline) => Some(LeafInfo {
             block: id,
             atomic: false,
             len: inline.len(),
+            chips: chip_map(inline, open),
         }),
         BlockContent::Plain(code) => Some(LeafInfo {
             block: id,
             atomic: false,
             len: code.len(),
+            chips: None,
         }),
         _ => None,
     }
+}
+
+/// FORK: the chips drawn in a leaf: its Link spans except the open ones.
+fn chip_map(inline: &InlineText, open: &[std::ops::Range<usize>]) -> Option<Rc<ChipMap>> {
+    if !inline.text().contains("[[") {
+        return None;
+    }
+    let mut spans = chip_spans(inline);
+    spans.retain(|span| !open.contains(span));
+    ChipMap::new(spans).map(Rc::new)
 }

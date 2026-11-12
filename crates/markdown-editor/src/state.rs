@@ -10,6 +10,9 @@ use gpui::{
     Window, actions,
 };
 
+use super::wiki_link::{
+    DirectoryHandle, HoverHandle, WikiChipPlugin, WikiLinkDirectory, WikiLinkState,
+};
 use super::{
     command::{CommandError, EditorCommand},
     editor::BlockEditorModel,
@@ -86,6 +89,12 @@ actions!(
         CalloutMenuDown,
         CalloutMenuPick,
         CalloutMenuClose,
+        // FORK: following a Link from the keyboard, and the Link Picker.
+        FollowWikiLink,
+        LinkPickerUp,
+        LinkPickerDown,
+        LinkPickerPick,
+        LinkPickerClose,
         Indent,
         Outdent,
         Copy,
@@ -224,6 +233,9 @@ pub(crate) fn init(cx: &mut App) {
         // FORK: the Callout type menu, for the callout holding the caret;
         // elsewhere the keystroke propagates.
         KeyBinding::new(platform_key!("cmd", "alt-c"), OpenCalloutMenu, ctx),
+        // FORK: follow the Link the caret is in or touches; elsewhere the
+        // keystroke propagates. Cmd/Ctrl-Enter is taken by `ExitBlock`.
+        KeyBinding::new(platform_key!("cmd", "alt-enter"), FollowWikiLink, ctx),
         KeyBinding::new("shift-enter", SoftBreak, ctx),
         KeyBinding::new(platform_key!("cmd", "enter"), ExitBlock, ctx),
         KeyBinding::new(platform_key!("cmd", "c"), Copy, ctx),
@@ -266,6 +278,16 @@ pub(crate) fn init(cx: &mut App) {
             "escape",
             CalloutMenuClose,
             Some("BlockEditor && callout_menu"),
+        ),
+        // FORK: the Link Picker's keys, likewise.
+        KeyBinding::new("up", LinkPickerUp, Some("BlockEditor && link_picker")),
+        KeyBinding::new("down", LinkPickerDown, Some("BlockEditor && link_picker")),
+        KeyBinding::new("enter", LinkPickerPick, Some("BlockEditor && link_picker")),
+        KeyBinding::new("tab", LinkPickerPick, Some("BlockEditor && link_picker")),
+        KeyBinding::new(
+            "escape",
+            LinkPickerClose,
+            Some("BlockEditor && link_picker"),
         ),
     ]);
 }
@@ -333,8 +355,21 @@ pub enum BlockEditorEvent {
     LinkHovered {
         url: Option<SharedString>,
     },
+    /// FORK: Cmd/Ctrl+click on a Link chip (`[[slug#heading]]`). The host
+    /// decides what it points at and whether to open it; the editor doesn't
+    /// move the caret.
+    WikiLinkClicked {
+        slug: SharedString,
+        heading: Option<SharedString>,
+    },
     Focus,
     Blur,
+    /// FORK: the Link Picker's "Create Note" row was picked. The host creates
+    /// the Note and answers with [`BlockEditorState::complete_link_pick`];
+    /// if it can't, it does nothing and the typed text stays as it was.
+    CreateLinkTargetRequested {
+        title: SharedString,
+    },
     /// Enter requested submission; emitted only outside IME composition. The
     /// owner applies completion/picker and domain-send policy, in that order.
     SubmitRequested,
@@ -417,11 +452,18 @@ pub struct BlockEditorState {
     /// The caret moved and should be scrolled into view after layout.
     pub(crate) reveal: std::cell::Cell<bool>,
     marked: Option<Marked>,
+    /// FORK: what the host knows about Links, shared with the chip plugin.
+    wiki_links: DirectoryHandle,
+    /// FORK: the chip under the pointer while Cmd/Ctrl is held.
+    wiki_hover: HoverHandle,
     /// An IME composition opened an undo group that is not committed yet.
     composition_open: bool,
     /// Remembered x for repeated up/down.
     goal_x: Option<Pixels>,
     pub(crate) dragging: bool,
+    /// FORK: a plain press on a closed Link chip, opened on release unless
+    /// the press became a drag.
+    chip_press: Option<(BlockId, Range<usize>)>,
     /// A press on a block handle, and the drag to reorder it (D22).
     pub(crate) block_drag: Option<BlockDrag>,
     /// FORK: `pub(crate)` for the menus in `insert_menu.rs` and
@@ -437,6 +479,8 @@ pub struct BlockEditorState {
     hovered_link: Option<SharedString>,
     /// The mouse is over a task checkbox, or a link with Cmd/Ctrl held.
     pub(crate) pointer_hand: bool,
+    /// FORK: Cmd/Ctrl is held over a broken Link chip.
+    pub(crate) pointer_arrow: bool,
     /// The open table grip menu (D20).
     pub(crate) table_menu: Option<super::table_ui::TableMenu>,
     /// FORK: the open Insert Menu, and the options it offers.
@@ -444,6 +488,11 @@ pub struct BlockEditorState {
     pub(crate) insert_menu_options: Vec<super::insert_menu::InsertMenuOption>,
     /// FORK: the open Callout type menu.
     pub(crate) callout_menu: Option<super::menu::OpenMenu>,
+    /// FORK: the open Link Picker, what it is matching, and its candidates.
+    pub(crate) link_picker: Option<super::menu::OpenMenu>,
+    pub(crate) link_query: super::link_picker::LinkQuery,
+    pub(crate) link_candidates: std::sync::Arc<[super::link_picker::LinkCandidate]>,
+    pub(crate) link_scroll: gpui::ScrollHandle,
     /// The table grips the pointer shows (to repaint on change).
     pub(crate) table_hover: Vec<(BlockId, crate::TableLine)>,
     /// The pointer is on a table grip (grab cursor).
@@ -478,6 +527,7 @@ impl BlockEditorState {
                 // FORK: blur closes the menus.
                 this.insert_menu = None;
                 this.callout_menu = None;
+                this.link_picker = None;
                 cx.emit(BlockEditorEvent::Blur);
             }),
             cx.observe_window_activation(window, |this, window, cx| {
@@ -486,7 +536,14 @@ impl BlockEditorState {
                 }
             }),
         ];
-        let model = BlockEditorModel::from_markdown("", MarkdownExtensions::default())
+        // FORK: the Link chip plugin reads the directory through this handle.
+        let wiki_links = DirectoryHandle::default();
+        let wiki_hover = HoverHandle::default();
+        let extensions = MarkdownExtensions::default().plugin(WikiChipPlugin {
+            directory: wiki_links.clone(),
+            hover: wiki_hover.clone(),
+        });
+        let model = BlockEditorModel::from_markdown("", extensions)
             .unwrap_or_else(|_| unreachable!("empty source always parses"));
         Self {
             model,
@@ -500,9 +557,12 @@ impl BlockEditorState {
             scroll_handle: Some(gpui::ScrollHandle::new()),
             reveal: Default::default(),
             marked: None,
+            wiki_links,
+            wiki_hover,
             composition_open: false,
             goal_x: None,
             dragging: false,
+            chip_press: None,
             block_drag: None,
             readonly: false,
             toolbar_hidden: false,
@@ -515,11 +575,16 @@ impl BlockEditorState {
             input_rule_filter: None,
             hovered_link: None,
             pointer_hand: false,
+            pointer_arrow: false,
             table_menu: None,
             // FORK
             insert_menu: None,
             insert_menu_options: super::insert_menu::InsertMenuOption::defaults(),
             callout_menu: None,
+            link_picker: None,
+            link_query: Default::default(),
+            link_candidates: Vec::new().into(),
+            link_scroll: gpui::ScrollHandle::new(),
             table_hover: Vec::new(),
             grip_hover: false,
             _subscriptions: subscriptions,
@@ -550,6 +615,9 @@ impl BlockEditorState {
         }
         if self.callout_menu.is_some() {
             context.push_str(" callout_menu");
+        }
+        if self.link_picker.is_some() {
+            context.push_str(" link_picker");
         }
         context
     }
@@ -645,6 +713,44 @@ impl BlockEditorState {
         let _ = self.model.set_source(source);
         self.projection.invalidate();
         self
+    }
+
+    /// FORK: tells the editor which Item each Link points at, for the chips.
+    /// Links whose slug is missing draw as broken. No `Changed` event.
+    pub fn set_wiki_links(&mut self, directory: Arc<WikiLinkDirectory>, cx: &mut Context<Self>) {
+        let mut current = self
+            .wiki_links
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if *current == directory {
+            return;
+        }
+        *current = directory;
+        drop(current);
+        cx.notify();
+    }
+
+    /// FORK: the slug of every Link in the document that shows as a chip,
+    /// for the host to look up. The text of a Link is never changed to match.
+    pub fn wiki_link_slugs(&self) -> Vec<String> {
+        let doc = &self.model.doc;
+        let mut slugs: Vec<String> = doc
+            .leaves()
+            .iter()
+            .filter_map(|leaf| doc.inline(*leaf))
+            .flat_map(|inline| {
+                super::wiki_chip::chip_spans(inline)
+                    .into_iter()
+                    .filter_map(|span| {
+                        super::wiki_chip::source_parts(&inline.text()[span])
+                            .map(|parts| parts.slug.to_string())
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        slugs.sort();
+        slugs.dedup();
+        slugs
     }
 
     /// Replace the content. No `Changed` event; clears history.
@@ -904,7 +1010,14 @@ impl BlockEditorState {
     pub(crate) fn snapshot(&mut self) -> Rc<Snapshot> {
         self.projection
             .set_placeholders(self.image_policy == super::ImagePolicy::Placeholder);
-        self.projection.snapshot(&self.model.doc)
+        // FORK: Links with a selection end inside, or being composed in, are
+        // shown as source.
+        let open = super::wiki_chip::OpenSpans::new(
+            &self.model.doc,
+            self.model.selection(),
+            self.marked_range(),
+        );
+        self.projection.snapshot(&self.model.doc, open)
     }
 
     /// Blocks that are always laid out: the selection ends, the IME
@@ -962,6 +1075,7 @@ impl BlockEditorState {
         // FORK: refilter or close the Insert Menu. The type menu is for the
         // document as it was when it opened, so it closes.
         self.sync_insert_menu();
+        self.sync_link_picker(true);
         self.callout_menu = None;
         self.goal_x = None;
         self.reveal.set(true);
@@ -978,6 +1092,7 @@ impl BlockEditorState {
         // FORK: a caret move closes the type menu, and the Insert Menu once
         // the caret leaves its paragraph.
         self.sync_insert_menu();
+        self.sync_link_picker(false);
         self.callout_menu = None;
         self.reveal.set(true);
         self.pause_blink(cx);
@@ -1018,6 +1133,7 @@ impl BlockEditorState {
         // FORK: the Insert Menu held still while composing; the committed
         // (or cancelled) text filters it now.
         self.sync_insert_menu();
+        self.sync_link_picker(true);
     }
 
     /// Whether an IME undo group is open (tests: it must never leak).
@@ -1581,9 +1697,39 @@ impl BlockEditorState {
     pub(crate) fn hover_at(&mut self, at: Point<Pixels>, secondary: bool, cx: &mut Context<Self>) {
         self.hover_table(at, cx);
         let url = self.link_at(at).map(|(_, _, url)| url);
-        let hand = self.task_checkbox_at(at).is_some() || (secondary && url.is_some());
+        // FORK: a Link chip under the pointer with Cmd/Ctrl held. A working
+        // or ambiguous one darkens, underlines and shows a hand; a broken one
+        // shows an arrow and a tooltip.
+        let chip = secondary.then(|| self.wiki_chip_at(at)).flatten();
+        let chip_key = chip
+            .as_ref()
+            .map(|chip| super::wiki_chip::ChipKey::new(chip.block, chip.span.start));
+        let followable = chip.as_ref().is_some_and(|chip| {
+            self.wiki_links
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .get(&chip.slug)
+                .is_some_and(|info| info.state != WikiLinkState::Broken)
+        });
+        {
+            let mut hover = self
+                .wiki_hover
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if *hover != chip_key {
+                *hover = chip_key;
+                cx.notify();
+            }
+        }
+        let hand =
+            self.task_checkbox_at(at).is_some() || (secondary && url.is_some()) || followable;
         if hand != self.pointer_hand {
             self.pointer_hand = hand;
+            cx.notify();
+        }
+        let arrow = chip.is_some() && !followable;
+        if arrow != self.pointer_arrow {
+            self.pointer_arrow = arrow;
             cx.notify();
         }
         if url != self.hovered_link {
@@ -1603,6 +1749,106 @@ impl BlockEditorState {
             }
             None => false,
         }
+    }
+
+    /// FORK: the Link chip drawn under the window point `at`.
+    fn wiki_chip_at(&self, at: Point<Pixels>) -> Option<super::wiki_chip::WikiChipHit> {
+        let (block, span) = {
+            let frame = self.frame.borrow();
+            let pos = frame.hit_test(at)?;
+            let leaf = frame.leaf(pos.block)?;
+            if !leaf.bounds().contains(&at) {
+                return None;
+            }
+            (pos.block, leaf.chip_at(at)?)
+        };
+        self.wiki_chip_hit(block, span)
+    }
+
+    /// FORK: the Link at `span` of `block`, as a hit.
+    fn wiki_chip_hit(
+        &self,
+        block: BlockId,
+        span: std::ops::Range<usize>,
+    ) -> Option<super::wiki_chip::WikiChipHit> {
+        let source = self.model.doc.inline(block)?.text().get(span.clone())?;
+        let parts = super::wiki_chip::source_parts(source)?;
+        Some(super::wiki_chip::WikiChipHit {
+            block,
+            span,
+            slug: parts.slug.to_string(),
+            heading: parts.heading.map(|h| h.to_string().into()),
+        })
+    }
+
+    /// FORK: the Link whose span holds the caret or has it at an edge.
+    fn wiki_chip_at_caret(&self) -> Option<super::wiki_chip::WikiChipHit> {
+        let BlockSelection::Text { anchor, head } = self.model.selection() else {
+            return None;
+        };
+        if anchor != head {
+            return None;
+        }
+        let inline = self.model.doc.inline(head.block)?;
+        let span = super::wiki_chip::chip_spans(inline)
+            .into_iter()
+            .find(|span| span.start <= head.offset && head.offset <= span.end)?;
+        self.wiki_chip_hit(head.block, span)
+    }
+
+    /// FORK: the keyboard route to following a Link: emit
+    /// [`BlockEditorEvent::WikiLinkClicked`] for the one the caret is in or
+    /// touches. Elsewhere the key passes on.
+    pub(crate) fn on_follow_wiki_link(
+        &mut self,
+        _: &FollowWikiLink,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match self.wiki_chip_at_caret() {
+            Some(chip) => cx.emit(BlockEditorEvent::WikiLinkClicked {
+                slug: chip.slug.into(),
+                heading: chip.heading,
+            }),
+            None => cx.propagate(),
+        }
+    }
+
+    /// FORK: Cmd/Ctrl+click: emit [`BlockEditorEvent::WikiLinkClicked`] for
+    /// the Link chip under `at`. Returns whether there was one.
+    pub(crate) fn follow_wiki_link_at(
+        &mut self,
+        at: Point<Pixels>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        match self.wiki_chip_at(at) {
+            Some(chip) => {
+                cx.emit(BlockEditorEvent::WikiLinkClicked {
+                    slug: chip.slug.into(),
+                    heading: chip.heading,
+                });
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// FORK: puts the caret at the start of the first heading whose text is
+    /// `text`, ignoring case, and scrolls it into view. Returns whether one
+    /// was found.
+    pub fn reveal_heading(&mut self, text: &str, cx: &mut Context<Self>) -> bool {
+        let Some(position) = super::wiki_chip::heading_position(&self.model.doc, text) else {
+            return false;
+        };
+        if self
+            .model
+            .set_selection(BlockSelection::caret(position))
+            .is_err()
+        {
+            return false;
+        }
+        self.selection_changed(cx);
+        true
     }
 
     /// The url of the link at the caret (or the selection start).
@@ -1718,6 +1964,35 @@ impl BlockEditorState {
                 _ => None,
             }
         })
+    }
+
+    /// FORK: remembers a plain press on a closed Link chip (`chip_at`). The
+    /// press itself places the caret at the nearer edge, so a drag from the
+    /// chip never starts inside it.
+    pub(crate) fn press_chip(&mut self, at: Point<Pixels>) {
+        let hit = self.frame.borrow().hit_test(at);
+        self.chip_press = hit.and_then(|pos| {
+            let span = self.frame.borrow().leaf(pos.block)?.chip_at(at)?;
+            Some((pos.block, span))
+        });
+    }
+
+    /// FORK: releasing on the chip that was pressed, with no drag in
+    /// between, opens it: the caret goes just before `]]`.
+    pub(crate) fn release_chip(&mut self, cx: &mut Context<Self>) {
+        let Some((block, span)) = self.chip_press.take() else {
+            return;
+        };
+        let at_edge = matches!(
+            self.model.selection(),
+            BlockSelection::Text { anchor, head }
+                if anchor == head
+                    && anchor.block == block
+                    && (anchor.offset == span.start || anchor.offset == span.end)
+        );
+        if at_edge {
+            self.move_to(BlockPosition::new(block, span.end - 2), false, cx);
+        }
     }
 
     /// Mouse: place or extend the caret at a window point.
@@ -2978,6 +3253,9 @@ impl EntityInputHandler for BlockEditorState {
         // FORK: a typed `/` may open the Insert Menu.
         if text == "/" && !composing {
             self.maybe_open_insert_menu(cx);
+        } else if text.ends_with('[') && !composing {
+            // FORK: a typed `[[` may open the Link Picker.
+            self.maybe_open_link_picker(cx);
         } else if text == " " {
             self.apply_input_rule(cx);
         } else if text.ends_with(['`', '*', '~']) && self.rule_on(RuleKind::InlineMarks) {

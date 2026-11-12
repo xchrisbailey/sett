@@ -34,7 +34,7 @@ pub(crate) fn into_frame(
         if let Some(geometry) = geometries.remove(&info.block.as_u64()) {
             frame.index.insert(info.block, frame.leaves.len());
             frame.leaves.push(LeafGeom {
-                info: *info,
+                info: info.clone(),
                 geometry,
                 align: ColumnAlign::None,
             });
@@ -101,7 +101,13 @@ impl LeafGeom {
         if self.info.atomic {
             if offset == 0 { 0 } else { len }
         } else {
-            offset.min(self.info.len).min(len)
+            // FORK: a closed Link chip is shorter in the renderer's text.
+            let offset = offset.min(self.info.len);
+            match &self.info.chips {
+                Some(chips) => chips.to_rendered(offset),
+                None => offset,
+            }
+            .min(len)
         }
     }
 
@@ -125,13 +131,34 @@ impl LeafGeom {
         if self.info.atomic {
             usize::from(index * 2 > self.geometry.len().max(1))
         } else {
-            index.min(self.info.len)
+            // FORK: back from the renderer's index, snapping to the nearer
+            // edge of a chip.
+            match &self.info.chips {
+                Some(chips) => chips.to_model(index),
+                None => index,
+            }
+            .min(self.info.len)
         }
     }
 
-    /// The inline atom drawn under `at`, as its leaf byte range.
+    /// The inline atom drawn under `at`, as its leaf byte range. A Link chip
+    /// is not one: it is text in the document (see [`Self::chip_at`]).
     pub(crate) fn atom_at(&self, at: Point<Pixels>) -> Option<Range<usize>> {
-        self.geometry.atom_at(at)
+        let rendered = self.geometry.atom_at(at)?;
+        let Some(chips) = &self.info.chips else {
+            return Some(rendered);
+        };
+        if chips.span_at_rendered(&rendered).is_some() {
+            return None;
+        }
+        let start = chips.to_model(rendered.start);
+        Some(start..start + rendered.len())
+    }
+
+    /// FORK: the model range of the closed Link chip drawn under `at`.
+    pub(crate) fn chip_at(&self, at: Point<Pixels>) -> Option<Range<usize>> {
+        let rendered = self.geometry.atom_at(at)?;
+        self.info.chips.as_ref()?.span_at_rendered(&rendered)
     }
 }
 

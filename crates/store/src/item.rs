@@ -21,6 +21,9 @@ pub struct Task {
     pub due: Option<Date>,
     pub done: Option<Date>,
     pub body: String,
+    /// When the file was last written, by sett or anyone else. `None` for a
+    /// file whose time can't be read.
+    pub modified: Option<SystemTime>,
     /// Every frontmatter key as last read or written, so unknown keys survive
     /// a save in their original order.
     pub(crate) fields: Mapping,
@@ -29,6 +32,12 @@ pub struct Task {
 }
 
 impl Task {
+    /// This Item with the time its file was last written.
+    pub(crate) fn with_modified(mut self, modified: Option<SystemTime>) -> Task {
+        self.modified = modified;
+        self
+    }
+
     /// Whether the file's frontmatter couldn't be read. sett never writes such
     /// a file, so it must be fixed in another editor.
     pub fn frontmatter_error(&self) -> bool {
@@ -47,6 +56,7 @@ impl Task {
             due: doc.date("due"),
             done: doc.date("done"),
             body: doc.body.clone(),
+            modified: None,
             fields: doc.fields,
             unreadable: doc.unreadable,
         }
@@ -152,6 +162,12 @@ pub struct Note {
 }
 
 impl Note {
+    /// This Item with the time its file was last written.
+    pub(crate) fn with_modified(mut self, modified: Option<SystemTime>) -> Note {
+        self.modified = modified;
+        self
+    }
+
     /// Whether the file's frontmatter couldn't be read. sett never writes such
     /// a file, so it must be fixed in another editor.
     pub fn frontmatter_error(&self) -> bool {
@@ -190,6 +206,9 @@ pub struct JournalEntry {
     pub space: Space,
     pub date: Date,
     pub body: String,
+    /// When the file was last written, by sett or anyone else. `None` for an
+    /// entry without a file, or one whose time can't be read.
+    pub modified: Option<SystemTime>,
     /// Every frontmatter key as last read or written, so unknown keys survive
     /// a save in their original order.
     pub(crate) fields: Mapping,
@@ -198,6 +217,12 @@ pub struct JournalEntry {
 }
 
 impl JournalEntry {
+    /// This Item with the time its file was last written.
+    pub(crate) fn with_modified(mut self, modified: Option<SystemTime>) -> JournalEntry {
+        self.modified = modified;
+        self
+    }
+
     /// Whether the file's frontmatter couldn't be read. sett never writes such
     /// a file, so it must be fixed in another editor.
     pub fn frontmatter_error(&self) -> bool {
@@ -210,6 +235,7 @@ impl JournalEntry {
             space,
             date,
             body: String::new(),
+            modified: None,
             fields: Mapping::new(),
             unreadable: None,
         }
@@ -220,6 +246,7 @@ impl JournalEntry {
             space,
             date,
             body: doc.body,
+            modified: None,
             fields: doc.fields,
             unreadable: doc.unreadable,
         }

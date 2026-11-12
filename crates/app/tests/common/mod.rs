@@ -2,7 +2,9 @@
 
 #![allow(dead_code)]
 
+use std::fs;
 use std::path::PathBuf;
+use std::time::{Duration, SystemTime};
 
 use gpui_kit::test::{ElementSnapshot, TestEventExt, TestQueryExt, TestWindowExt};
 use gpui_kit::{
@@ -10,7 +12,7 @@ use gpui_kit::{
     WindowOptions, px, size,
 };
 use sett::{AppModel, Shell};
-use sett_store::Settings;
+use sett_store::{Change, Settings};
 
 pub struct Fixture {
     _dir: tempfile::TempDir,
@@ -110,4 +112,99 @@ pub fn center_title(window: &mut Window) -> String {
         .label()
         .unwrap_or_default()
         .to_string()
+}
+
+/// Longer than the autosave delay.
+const AFTER_AUTOSAVE: Duration = Duration::from_secs(2);
+
+/// Writes a file in the personal Space and tells the app.
+pub fn write(cx: &mut TestAppContext, f: &Fixture, rel: &str, text: &str, change: Change) {
+    write_aged(cx, f, rel, text, 0, change);
+}
+
+/// Like [`write`], with the file `age` seconds old.
+pub fn write_aged(
+    cx: &mut TestAppContext,
+    f: &Fixture,
+    rel: &str,
+    text: &str,
+    age: u64,
+    change: Change,
+) {
+    let path = f.data_root.join("personal").join(rel);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(&path, text).unwrap();
+    if age > 0 {
+        let when = SystemTime::now() - Duration::from_secs(age);
+        fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(when)
+            .unwrap();
+    }
+    let model = f.model(cx);
+    cx.update(|cx| model.update(cx, |w, cx| w.apply_change(change, cx)));
+}
+
+/// The change for a Note, in `project` or at the Space level.
+pub fn note(project: Option<&str>, slug: &str) -> Change {
+    Change::Note {
+        project: project.map(str::to_string),
+        slug: slug.to_string(),
+    }
+}
+
+/// Lets the autosave write.
+pub fn settle(cx: &mut TestAppContext) {
+    cx.executor().advance_clock(AFTER_AUTOSAVE);
+    cx.run_until_parked();
+}
+
+/// Types `text` into whatever has focus.
+pub fn input(cx: &mut TestAppContext, f: &Fixture, text: &str) {
+    cx.update_window(f.window, |_, window, cx| {
+        window.render_frame(cx);
+        window.input(text, cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+}
+
+/// Presses each of the space-separated keystrokes in `keys`.
+pub fn press(cx: &mut TestAppContext, f: &Fixture, keys: &str) {
+    cx.update_window(f.window, |_, window, cx| {
+        window.render_frame(cx);
+        for key in keys.split_whitespace() {
+            window.press(key, cx);
+        }
+    })
+    .unwrap();
+    cx.run_until_parked();
+}
+
+/// Presses `key` `times` times.
+pub fn press_n(cx: &mut TestAppContext, f: &Fixture, key: &str, times: usize) {
+    press(cx, f, &vec![key; times].join(" "));
+}
+
+/// Whether anything in the window has this accessible label.
+pub fn has_label(cx: &mut TestAppContext, f: &Fixture, label: &str) -> bool {
+    cx.update_window(f.window, |_, window, cx| {
+        window.render_frame(cx);
+        window.try_find_by_label(label).is_some()
+    })
+    .unwrap()
+}
+
+/// Whether the note body has something with this accessible label.
+pub fn body_has_label(cx: &mut TestAppContext, f: &Fixture, label: &str) -> bool {
+    cx.update_window(f.window, |_, window, cx| {
+        window.render_frame(cx);
+        window
+            .within("note-body")
+            .try_find_by_label(label)
+            .is_some()
+    })
+    .unwrap()
 }

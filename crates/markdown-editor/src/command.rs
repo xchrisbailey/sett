@@ -570,6 +570,19 @@ impl BlockEditorModel {
                 tx.remove_block(pos.block)?;
                 return Ok(None);
             };
+            // FORK: next to a closed Link chip, Backspace / Delete takes the
+            // whole `[[…]]` span in one transaction (an open chip has the
+            // caret strictly inside, so it falls through to one character).
+            if let Some(span) = crate::wiki_chip::chip_spans(inline).into_iter().find(|s| {
+                if forward {
+                    s.start == pos.offset
+                } else {
+                    s.end == pos.offset
+                }
+            }) {
+                tx.replace_text(pos.block, span.clone(), InlineText::new())?;
+                return Ok(caret(BlockPosition::new(pos.block, span.start)));
+            }
             if !forward && pos.offset > 0 {
                 let prev = inline.prev_grapheme(pos.offset).unwrap_or(0);
                 tx.replace_text(pos.block, prev..pos.offset, InlineText::new())?;

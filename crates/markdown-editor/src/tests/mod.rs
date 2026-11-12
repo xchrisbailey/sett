@@ -1,3 +1,4 @@
+mod chips;
 mod commands;
 mod host;
 mod projection;
