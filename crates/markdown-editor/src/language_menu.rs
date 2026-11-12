@@ -5,7 +5,7 @@
 //! block's language as one undo step. The editor keeps focus and the caret
 //! never moves, on pick or on close.
 
-use gpui::{Bounds, Context, Pixels, Point};
+use gpui::{Context, Pixels, Point};
 
 use super::{
     id::BlockId,
@@ -13,7 +13,6 @@ use super::{
     language::{CODE_BLOCK_LANGUAGES, LanguageEntry},
     menu::{self, MenuSlot, OpenMenu},
     state::BlockEditorState,
-    transaction::EditOrigin,
 };
 
 /// One row of the menu.
@@ -109,11 +108,9 @@ impl BlockEditorState {
         let Some(lang) = self.code_lang(block) else {
             return;
         };
-        if self.readonly {
+        if !self.begin_menu_open(cx) {
             return;
         }
-        self.end_composition();
-        self.close_all_menus(cx);
         let highlighted = rows("")
             .iter()
             .position(|row| row.is_current(lang.as_deref()))
@@ -125,17 +122,10 @@ impl BlockEditorState {
     /// A click on a Code Block's language label opens its menu. Returns
     /// whether the click was on one.
     pub(crate) fn click_code_label(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) -> bool {
-        let Some(block) = self.code_label_at(at) else {
-            return false;
-        };
-        self.open_language_menu(block, cx);
-        true
+        self.click_menu_anchor(MenuSlot::Language, at, cx)
     }
 
     /// The shortcut: open the menu for the Code Block holding the caret.
-    /// Elsewhere the key passes on. A label that wasn't drawn in view last
-    /// frame (scrolled away, or not laid out yet) opens nothing, since the
-    /// menu would hang from somewhere the user can't see.
     pub(crate) fn on_open_language_menu(
         &mut self,
         _: &super::state::OpenLanguageMenu,
@@ -147,31 +137,7 @@ impl BlockEditorState {
             .caret()
             .map(|pos| pos.block)
             .filter(|block| self.code_lang(*block).is_some());
-        match block {
-            Some(block) if !self.readonly => {
-                if self.code_label_in_view(block) {
-                    self.open_language_menu(block, cx);
-                }
-            }
-            _ => cx.propagate(),
-        }
-    }
-
-    /// The Code Block `block`'s label bounds in the last painted frame.
-    fn code_label_bounds(&self, block: BlockId) -> Option<Bounds<Pixels>> {
-        let frame = self.frame.borrow();
-        let (_, bounds) = frame.code_labels.iter().find(|(id, _)| *id == block)?;
-        Some(*bounds)
-    }
-
-    /// Whether `block`'s label was drawn last frame inside the scrolled
-    /// viewport (anywhere, with no scroll container).
-    fn code_label_in_view(&self, block: BlockId) -> bool {
-        self.code_label_bounds(block).is_some_and(|label| {
-            self.scroll_handle
-                .as_ref()
-                .is_none_or(|scroll| scroll.bounds().intersects(&label))
-        })
+        self.open_menu_by_shortcut(MenuSlot::Language, block, cx);
     }
 
     /// Move the highlight down (`forward`) or up, wrapping at the ends.
@@ -221,29 +187,13 @@ impl BlockEditorState {
             return;
         };
         let lang = row.lang();
-        let Some(menu) = self.language_menu.take() else {
-            return;
-        };
-        cx.notify();
-        if self.code_lang(menu.block).is_none_or(|old| old == lang) {
-            return;
-        }
-        self.model.break_coalescing();
-        let changed = self.model.set_code_lang(menu.block, lang);
-        self.model.break_coalescing();
-        // Any edit closes the menu, so `menu.block` is still the Code Block
-        // it opened on and this can't fail. If it ever did, the document is
-        // unchanged and there is nothing to report.
-        if changed.unwrap_or(false) {
-            self.after_edit(EditOrigin::Command("set_code_lang"), cx);
-        }
-    }
-
-    /// Where the open menu hangs from: under its Code Block's label, in
-    /// window coordinates, from the last painted frame.
-    pub(crate) fn language_menu_anchor(&self) -> Option<Point<Pixels>> {
-        let bounds = self.code_label_bounds(self.language_menu.as_ref()?.block)?;
-        Some(menu::below(bounds))
+        self.pick_anchored(
+            MenuSlot::Language,
+            |this, block| this.code_lang(block).is_none_or(|old| old == lang),
+            "set_code_lang",
+            |model, block| model.set_code_lang(block, lang.clone()).unwrap_or(false),
+            cx,
+        );
     }
 }
 
@@ -258,15 +208,14 @@ pub(crate) fn render(
         StatefulInteractiveElement as _, Styled as _, div, rems,
     };
     use gpui_kit::base::TestSupportExt as _;
-    use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _};
+    use gpui_kit::component::ActiveTheme as _;
 
-    const ICON_CHECK: &[u8] = include_bytes!("../assets/icons/check.svg");
     /// The list scrolls past this height.
     const MAX_HEIGHT_REMS: f32 = 18.;
 
     let s = state.read(cx);
     let menu = s.language_menu.as_ref()?;
-    let at = s.language_menu_anchor()?;
+    let at = s.anchor_below(MenuSlot::Language, menu.block)?;
     let current = s.code_lang(menu.block)?;
     let highlighted = menu.highlighted;
     let query = menu.query.as_str();
@@ -322,15 +271,19 @@ pub(crate) fn render(
             } else {
                 label.clone()
             };
-            let fg = menu::option_color(on, cx);
-            menu::option_row(state, MenuSlot::Language, ix, name, on, cx)
-                .child(div().flex_1().child(label))
-                // A fixed slot keeps the names aligned whether or not they
-                // are ticked.
-                .child(div().size_4().when(ticked, |this| {
-                    this.child(Icon::default().data(ICON_CHECK).small().text_color(fg))
-                }))
-                .into_any_element()
+            menu::checked_option(
+                state,
+                menu::CheckedOption {
+                    slot: MenuSlot::Language,
+                    ix,
+                    name: name.into(),
+                    label: label.into(),
+                    leading: None,
+                    on,
+                    ticked,
+                },
+                cx,
+            )
         }))
     };
     Some(menu::popover(

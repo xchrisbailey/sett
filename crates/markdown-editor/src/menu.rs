@@ -1,5 +1,6 @@
-//! FORK: what the Insert Menu and the Callout type menu share: the open
-//! menu's highlight, and the popover and option rows they are drawn with.
+//! FORK: what the editor's menus share: the open menu's highlight, the popover
+//! and option rows they are drawn with, and the open, click and pick plumbing
+//! of the menus anchored to a control (Callout, Language).
 //!
 //! They are custom rather than gpui-kit's `PopupMenu` because focus has to
 //! stay in the editor: the caret keeps blinking, typing keeps filtering the
@@ -12,9 +13,13 @@ use gpui::{
     anchored, deferred, div, point, prelude::FluentBuilder as _, px, rems,
 };
 use gpui_kit::base::TestSupportExt as _;
-use gpui_kit::component::ActiveTheme as _;
+use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _};
 
-use super::{id::BlockId, state::BlockEditorState};
+use super::{
+    editor::BlockEditorModel, id::BlockId, state::BlockEditorState, transaction::EditOrigin,
+};
+
+const ICON_CHECK: &[u8] = include_bytes!("../assets/icons/check.svg");
 
 /// How far below its anchor a menu hangs.
 const ANCHOR_GAP: Pixels = px(4.);
@@ -161,6 +166,134 @@ impl BlockEditorState {
     }
 }
 
+/// What the menus anchored to a control on a block (the Callout type menu on
+/// its header, the Language Menu on a Code Block's label) share: finding the
+/// control's bounds, opening from a click or the shortcut, and picking.
+impl BlockEditorState {
+    /// Open `slot`'s menu for `block`. Only the anchored menus open this way.
+    fn open_anchored_menu(&mut self, slot: MenuSlot, block: BlockId, cx: &mut Context<Self>) {
+        match slot {
+            MenuSlot::Callout => self.open_callout_menu(block, cx),
+            MenuSlot::Language => self.open_language_menu(block, cx),
+            MenuSlot::Insert | MenuSlot::Link => {}
+        }
+    }
+
+    /// The common start of opening an anchored menu: nothing opens read-only,
+    /// and an IME composition ends. Returns whether to go on, with every other
+    /// menu closed.
+    pub(crate) fn begin_menu_open(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.readonly {
+            return false;
+        }
+        self.end_composition();
+        self.close_all_menus(cx);
+        true
+    }
+
+    /// `block`'s anchor control for `slot`, in the last painted frame.
+    fn anchor_bounds(&self, slot: MenuSlot, block: BlockId) -> Option<Bounds<Pixels>> {
+        let frame = self.frame.borrow();
+        let list = match slot {
+            MenuSlot::Callout => &frame.callout_headers,
+            MenuSlot::Language => &frame.code_labels,
+            MenuSlot::Insert | MenuSlot::Link => return None,
+        };
+        let (_, bounds) = list.iter().find(|(id, _)| *id == block)?;
+        Some(*bounds)
+    }
+
+    /// Whether `block`'s anchor control was drawn last frame inside the
+    /// scrolled viewport (anywhere, with no scroll container).
+    fn anchor_in_view(&self, slot: MenuSlot, block: BlockId) -> bool {
+        self.anchor_bounds(slot, block).is_some_and(|anchor| {
+            self.scroll_handle
+                .as_ref()
+                .is_none_or(|scroll| scroll.bounds().intersects(&anchor))
+        })
+    }
+
+    /// Where `slot`'s menu hangs from: under `block`'s anchor control, in
+    /// window coordinates, from the last painted frame.
+    pub(crate) fn anchor_below(&self, slot: MenuSlot, block: BlockId) -> Option<Point<Pixels>> {
+        self.anchor_bounds(slot, block).map(below)
+    }
+
+    /// A click on an anchor control opens its menu. Returns whether the
+    /// click was on one.
+    pub(crate) fn click_menu_anchor(
+        &mut self,
+        slot: MenuSlot,
+        at: Point<Pixels>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let hit = {
+            let frame = self.frame.borrow();
+            match slot {
+                MenuSlot::Callout => frame.callout_header_at(at),
+                MenuSlot::Language => frame.code_label_at(at),
+                MenuSlot::Insert | MenuSlot::Link => None,
+            }
+        };
+        let Some(block) = hit else {
+            return false;
+        };
+        self.open_anchored_menu(slot, block, cx);
+        true
+    }
+
+    /// The shortcut: open `slot`'s menu for `block`, the block holding the
+    /// caret if it is the right kind. Elsewhere (`None`) the key passes on.
+    /// An anchor that wasn't drawn in view last frame (scrolled away, or not
+    /// laid out yet) opens nothing, since the menu would hang from somewhere
+    /// the user can't see.
+    pub(crate) fn open_menu_by_shortcut(
+        &mut self,
+        slot: MenuSlot,
+        block: Option<BlockId>,
+        cx: &mut Context<Self>,
+    ) {
+        match block {
+            Some(block) if !self.readonly => {
+                if self.anchor_in_view(slot, block) {
+                    self.open_anchored_menu(slot, block, cx);
+                }
+            }
+            _ => cx.propagate(),
+        }
+    }
+
+    /// Pick from `slot`'s menu: close it, and unless `unchanged` says the
+    /// block already has the choice, run `edit` on the block as one undo
+    /// step, leaving the caret where it is. `edit` returns whether it changed
+    /// the document.
+    pub(crate) fn pick_anchored(
+        &mut self,
+        slot: MenuSlot,
+        unchanged: impl FnOnce(&Self, BlockId) -> bool,
+        origin: &'static str,
+        edit: impl FnOnce(&mut BlockEditorModel, BlockId) -> bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(menu) = self.menu_slot(slot).take() else {
+            return;
+        };
+        cx.notify();
+        if unchanged(self, menu.block) {
+            return;
+        }
+        self.model.break_coalescing();
+        let changed = edit(&mut self.model, menu.block);
+        self.model.break_coalescing();
+        // Any edit closes the menu, so `menu.block` is still the block it
+        // opened on and the edit can't fail. If it ever did, the document is
+        // unchanged and there is nothing to report.
+        if changed {
+            self.after_edit(EditOrigin::Command(origin), cx);
+        }
+    }
+}
+
 /// Where a menu hangs from: just under `anchor`.
 pub(crate) fn below(anchor: Bounds<Pixels>) -> Point<Pixels> {
     point(anchor.left(), anchor.bottom() + ANCHOR_GAP)
@@ -211,6 +344,46 @@ pub(crate) fn option_row(
             cx.stop_propagation();
             click.update(cx, |state, cx| slot.pick(state, ix, cx));
         })
+}
+
+/// A row of a menu that ticks its current choice.
+pub(crate) struct CheckedOption {
+    pub(crate) slot: MenuSlot,
+    pub(crate) ix: usize,
+    /// The row's accessible name.
+    pub(crate) name: SharedString,
+    pub(crate) label: SharedString,
+    /// An icon before the label.
+    pub(crate) leading: Option<AnyElement>,
+    /// Highlighted.
+    pub(crate) on: bool,
+    pub(crate) ticked: bool,
+}
+
+/// `option` as a row: the optional leading icon, the label, then a fixed
+/// slot for the tick so names stay aligned whether or not they are ticked.
+pub(crate) fn checked_option(
+    state: &Entity<BlockEditorState>,
+    option: CheckedOption,
+    cx: &App,
+) -> AnyElement {
+    let CheckedOption {
+        slot,
+        ix,
+        name,
+        label,
+        leading,
+        on,
+        ticked,
+    } = option;
+    let fg = option_color(on, cx);
+    option_row(state, slot, ix, name, on, cx)
+        .children(leading)
+        .child(div().flex_1().child(label))
+        .child(div().size_4().when(ticked, |this| {
+            this.child(Icon::default().data(ICON_CHECK).small().text_color(fg))
+        }))
+        .into_any_element()
 }
 
 /// `slot`'s menu as a deferred popover hanging from `at` (window
