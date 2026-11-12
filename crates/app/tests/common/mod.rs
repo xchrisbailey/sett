@@ -29,6 +29,11 @@ impl Fixture {
 }
 
 pub fn open_shell(cx: &mut TestAppContext) -> Fixture {
+    open_shell_sized(cx, 1024., 720.)
+}
+
+/// [`open_shell`] in a window of this size, in points.
+pub fn open_shell_sized(cx: &mut TestAppContext, width: f32, height: f32) -> Fixture {
     let dir = tempfile::tempdir().unwrap();
     let settings_path = dir.path().join("settings.toml");
     let settings = Settings::defaults(dir.path());
@@ -43,7 +48,7 @@ pub fn open_shell(cx: &mut TestAppContext) -> Fixture {
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(Bounds::new(
                     Default::default(),
-                    size(px(1024.), px(720.)),
+                    size(px(width), px(height)),
                 ))),
                 ..Default::default()
             },
