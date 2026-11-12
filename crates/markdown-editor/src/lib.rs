@@ -67,6 +67,7 @@ mod input_rule;
 mod insert_menu;
 mod kind;
 mod language;
+mod language_menu;
 // FORK: the Link Picker.
 mod link_picker;
 mod markdown_source;

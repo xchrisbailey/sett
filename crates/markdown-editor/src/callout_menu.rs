@@ -48,6 +48,7 @@ impl BlockEditorState {
         }
         self.end_composition();
         self.insert_menu = None;
+        self.language_menu = None;
         self.close_table_menu(cx);
         let highlighted = CALLOUT_TYPES
             .iter()

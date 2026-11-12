@@ -455,6 +455,11 @@ impl RenderOnce for BlockEditor {
             .on_action(window.listener_for(s, BlockEditorState::on_callout_menu_down))
             .on_action(window.listener_for(s, BlockEditorState::on_callout_menu_pick))
             .on_action(window.listener_for(s, BlockEditorState::on_callout_menu_close))
+            .on_action(window.listener_for(s, BlockEditorState::on_open_language_menu))
+            .on_action(window.listener_for(s, BlockEditorState::on_language_menu_up))
+            .on_action(window.listener_for(s, BlockEditorState::on_language_menu_down))
+            .on_action(window.listener_for(s, BlockEditorState::on_language_menu_pick))
+            .on_action(window.listener_for(s, BlockEditorState::on_language_menu_close))
             .on_action(window.listener_for(s, BlockEditorState::on_follow_wiki_link))
             .on_action(window.listener_for(s, BlockEditorState::on_link_picker_up))
             .on_action(window.listener_for(s, BlockEditorState::on_link_picker_down))
@@ -476,6 +481,7 @@ impl RenderOnce for BlockEditor {
             // FORK: the Insert Menu and Callout type menu popovers.
             .children(super::insert_menu::render(&self.state, cx))
             .children(super::callout_menu::render(&self.state, cx))
+            .children(super::language_menu::render(&self.state, cx))
             .children(super::link_picker::render(&self.state, cx))
             .child(EditorRoot {
                 state: self.state.clone(),
@@ -895,9 +901,11 @@ impl Element for EditorRoot {
                 cx.stop_propagation();
                 return;
             }
-            // FORK: a Code Block's language label takes the click and leaves
-            // the caret where it is; #67 opens the Language Menu here.
-            if !event.modifiers.shift && entity.read(cx).code_label_at(event.position).is_some() {
+            // FORK: a Code Block's language label takes the click, opens the
+            // Language Menu and leaves the caret where it is.
+            if !event.modifiers.shift
+                && entity.update(cx, |state, cx| state.click_code_label(event.position, cx))
+            {
                 let focus = entity.read(cx).focus_handle.clone();
                 window.focus(&focus, cx);
                 cx.stop_propagation();

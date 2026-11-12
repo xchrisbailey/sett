@@ -52,6 +52,7 @@ impl OpenMenu {
 pub(crate) enum MenuSlot {
     Insert,
     Callout,
+    Language,
     Link,
 }
 
@@ -61,6 +62,7 @@ impl MenuSlot {
         match self {
             Self::Insert => ("block-editor-insert-menu", "Insert Menu"),
             Self::Callout => ("block-editor-callout-menu", "Callout type"),
+            Self::Language => ("block-editor-language-menu", "Language menu"),
             Self::Link => ("block-editor-link-picker", "Link Picker"),
         }
     }
@@ -70,6 +72,7 @@ impl MenuSlot {
         match self {
             Self::Insert => "insert-menu-option",
             Self::Callout => "callout-menu-option",
+            Self::Language => "language-menu-option",
             Self::Link => "link-picker-option",
         }
     }
@@ -78,6 +81,7 @@ impl MenuSlot {
         match self {
             Self::Insert => state.insert_menu_pick(ix, cx),
             Self::Callout => state.callout_menu_pick(ix, cx),
+            Self::Language => state.language_menu_pick(ix, cx),
             Self::Link => state.link_picker_pick(ix, cx),
         }
     }
@@ -88,6 +92,7 @@ impl BlockEditorState {
         match slot {
             MenuSlot::Insert => &mut self.insert_menu,
             MenuSlot::Callout => &mut self.callout_menu,
+            MenuSlot::Language => &mut self.language_menu,
             MenuSlot::Link => &mut self.link_picker,
         }
     }

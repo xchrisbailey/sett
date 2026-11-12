@@ -87,6 +87,10 @@ actions!(
         OpenCalloutMenu,
         // FORK: the Code Block language label's menu (#67).
         OpenLanguageMenu,
+        LanguageMenuUp,
+        LanguageMenuDown,
+        LanguageMenuPick,
+        LanguageMenuClose,
         CalloutMenuUp,
         CalloutMenuDown,
         CalloutMenuPick,
@@ -292,6 +296,28 @@ pub(crate) fn init(cx: &mut App) {
             "escape",
             LinkPickerClose,
             Some("BlockEditor && link_picker"),
+        ),
+        // FORK: the Language Menu's keys, registered last of all.
+        KeyBinding::new("up", LanguageMenuUp, Some("BlockEditor && language_menu")),
+        KeyBinding::new(
+            "down",
+            LanguageMenuDown,
+            Some("BlockEditor && language_menu"),
+        ),
+        KeyBinding::new(
+            "enter",
+            LanguageMenuPick,
+            Some("BlockEditor && language_menu"),
+        ),
+        KeyBinding::new(
+            "tab",
+            LanguageMenuPick,
+            Some("BlockEditor && language_menu"),
+        ),
+        KeyBinding::new(
+            "escape",
+            LanguageMenuClose,
+            Some("BlockEditor && language_menu"),
         ),
     ]);
 }
@@ -527,6 +553,9 @@ pub struct BlockEditorState {
     pub(crate) insert_menu_options: Vec<super::insert_menu::InsertMenuOption>,
     /// FORK: the open Callout type menu.
     pub(crate) callout_menu: Option<super::menu::OpenMenu>,
+    /// FORK: the open Language Menu (`language_menu.rs`) and its query.
+    pub(crate) language_menu: Option<super::menu::OpenMenu>,
+    pub(crate) language_query: String,
     /// FORK: the open Link Picker, what it is matching, and its candidates.
     pub(crate) link_picker: Option<super::menu::OpenMenu>,
     pub(crate) link_query: super::link_picker::LinkQuery,
@@ -566,6 +595,7 @@ impl BlockEditorState {
                 // FORK: blur closes the menus.
                 this.insert_menu = None;
                 this.callout_menu = None;
+                this.language_menu = None;
                 this.link_picker = None;
                 cx.emit(BlockEditorEvent::Blur);
             }),
@@ -620,6 +650,8 @@ impl BlockEditorState {
             insert_menu: None,
             insert_menu_options: super::insert_menu::InsertMenuOption::defaults(),
             callout_menu: None,
+            language_menu: None,
+            language_query: String::new(),
             link_picker: None,
             link_query: Default::default(),
             link_candidates: Vec::new().into(),
@@ -657,6 +689,9 @@ impl BlockEditorState {
         }
         if self.link_picker.is_some() {
             context.push_str(" link_picker");
+        }
+        if self.language_menu.is_some() {
+            context.push_str(" language_menu");
         }
         context
     }
@@ -1116,6 +1151,7 @@ impl BlockEditorState {
         self.sync_insert_menu();
         self.sync_link_picker(true);
         self.callout_menu = None;
+        self.language_menu = None;
         self.goal_x = None;
         self.reveal.set(true);
         self.pause_blink(cx);
@@ -1133,6 +1169,7 @@ impl BlockEditorState {
         self.sync_insert_menu();
         self.sync_link_picker(false);
         self.callout_menu = None;
+        self.language_menu = None;
         self.reveal.set(true);
         self.pause_blink(cx);
         cx.emit(BlockEditorEvent::SelectionChanged);
@@ -2315,10 +2352,17 @@ impl BlockEditorState {
     // ---- action handlers --------------------------------------------------
 
     pub(crate) fn on_backspace(&mut self, _: &Backspace, _: &mut Window, cx: &mut Context<Self>) {
+        // FORK: the Language Menu's query takes the key.
+        if self.language_query_backspace(cx) {
+            return;
+        }
         self.end_composition();
         self.edit(EditOrigin::Backspace, |m| m.delete(false), cx);
     }
     pub(crate) fn on_delete(&mut self, _: &Delete, _: &mut Window, cx: &mut Context<Self>) {
+        if self.language_menu.is_some() {
+            return;
+        }
         self.end_composition();
         self.edit(EditOrigin::DeleteForward, |m| m.delete(true), cx);
     }
@@ -2656,6 +2700,40 @@ impl BlockEditorState {
         cx: &mut Context<Self>,
     ) {
         self.close_menu(super::menu::MenuSlot::Callout, cx);
+    }
+    pub(crate) fn on_language_menu_up(
+        &mut self,
+        _: &LanguageMenuUp,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.language_menu_move(false, cx);
+    }
+    pub(crate) fn on_language_menu_down(
+        &mut self,
+        _: &LanguageMenuDown,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.language_menu_move(true, cx);
+    }
+    pub(crate) fn on_language_menu_pick(
+        &mut self,
+        _: &LanguageMenuPick,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(ix) = self.language_menu.as_ref().map(|m| m.highlighted) {
+            self.language_menu_pick(ix, cx);
+        }
+    }
+    pub(crate) fn on_language_menu_close(
+        &mut self,
+        _: &LanguageMenuClose,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.close_menu(super::menu::MenuSlot::Language, cx);
     }
     fn table_key(&mut self, edit: Option<crate::TableEdit>, cx: &mut Context<Self>) {
         if self.readonly || self.model.current_cell().is_none() {
@@ -3227,6 +3305,11 @@ impl EntityInputHandler for BlockEditorState {
         if self.readonly {
             return;
         }
+        // FORK: typed text goes to the Language Menu's query, not the code.
+        if self.language_menu.is_some() {
+            self.language_query_type(text, cx);
+            return;
+        }
         let composing = self.marked.is_some();
         self.select_marked_or(range16);
         let origin = if composing {
@@ -3259,7 +3342,9 @@ impl EntityInputHandler for BlockEditorState {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.readonly {
+        // FORK: text being composed stays out of the Language Menu's query
+        // until it is committed.
+        if self.readonly || self.language_menu.is_some() {
             return;
         }
         if new_text.is_empty() {
