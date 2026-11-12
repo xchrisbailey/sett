@@ -3,8 +3,8 @@ use std::path::Path;
 use gpui_kit::component::TitleBar;
 use gpui_kit::*;
 use sett::{
-    AppModel, ArchiveProject, DeleteProject, EditProject, NewProject, Shell, ShowPersonal,
-    ShowWork, ToggleEditorMode, UnarchiveProject,
+    AppModel, ArchiveProject, DeleteProject, EditProject, GoBack, GoForward, NewProject, Shell,
+    ShowPersonal, ShowWork, ToggleEditorMode, UnarchiveProject,
 };
 use sett_store::{LinkTarget, Settings};
 
@@ -28,6 +28,10 @@ fn main() {
         cx.set_menus(vec![
             Menu::new("sett").items([MenuItem::action("Quit sett", Quit)]),
             Menu::new("View").items([MenuItem::action("Toggle Raw Markdown", ToggleEditorMode)]),
+            Menu::new("Go").items([
+                MenuItem::action("Back", GoBack),
+                MenuItem::action("Forward", GoForward),
+            ]),
             Menu::new("Space").items([
                 MenuItem::action("Personal", ShowPersonal),
                 MenuItem::action("Work", ShowWork),

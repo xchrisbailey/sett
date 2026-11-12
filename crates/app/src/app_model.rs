@@ -44,6 +44,9 @@ pub struct AppModel {
     selections: HashMap<Space, Selection>,
     /// The Item open in each Space, reopened when switching back to it.
     open_items: HashMap<Space, ItemId>,
+    /// The Items opened in each Space, for Back and Forward. Kept per Space so
+    /// switching Space never walks into the other one's history (ADR 0002).
+    histories: HashMap<Space, History>,
     /// A heading to put the caret at once the editor shows this Item, set by
     /// following `[[slug#Heading]]`.
     reveal: Option<(ItemId, String)>,
@@ -102,6 +105,7 @@ impl AppModel {
                 index,
                 selections: HashMap::new(),
                 open_items: HashMap::new(),
+                histories: HashMap::new(),
                 reveal: None,
                 watching,
             }
@@ -137,9 +141,47 @@ impl AppModel {
     /// reopens it.
     pub(crate) fn set_open_item(&mut self, item: Option<ItemId>) {
         match item {
-            Some(item) => self.open_items.insert(self.space(), item),
+            Some(item) => {
+                self.record_visit(item.clone());
+                self.open_items.insert(self.space(), item)
+            }
             None => self.open_items.remove(&self.space()),
         };
+    }
+
+    /// Adds an Item the active Space just showed to its history. Showing the
+    /// current one again adds nothing; opening anything else after going back
+    /// drops the forward entries.
+    pub(crate) fn record_visit(&mut self, item: ItemId) {
+        self.histories.entry(self.space()).or_default().visit(item);
+    }
+
+    /// Reopens the previous Item in the active Space's history, skipping any
+    /// that no longer exist. Does nothing at the start.
+    pub fn go_back(&mut self, cx: &mut Context<Self>) {
+        self.step(Direction::Back, cx);
+    }
+
+    /// The counterpart of [`AppModel::go_back`].
+    pub fn go_forward(&mut self, cx: &mut Context<Self>) {
+        self.step(Direction::Forward, cx);
+    }
+
+    fn step(&mut self, direction: Direction, cx: &mut Context<Self>) {
+        let index = &self.index;
+        let Some(history) = self.histories.get_mut(&index.space()) else {
+            return;
+        };
+        let Some(item) = history.step(direction, |item| {
+            // A Journal Entry's file is only created on its first edit, so any
+            // date can be reopened.
+            matches!(item, ItemId::Journal(_)) || index.title(item).is_some()
+        }) else {
+            return;
+        };
+        // The history already points at `item`, so the views recording the
+        // open find it current and add nothing.
+        self.open_item_at(item, None, cx);
     }
 
     /// Selects where an Item of the active Space lives and asks the view
@@ -151,6 +193,7 @@ impl AppModel {
     /// Like [`AppModel::open_item`], and once the editor shows the Item it puts
     /// the caret at the first heading called `heading`, if there is one.
     pub fn open_item_at(&mut self, item: ItemId, heading: Option<String>, cx: &mut Context<Self>) {
+        self.record_visit(item.clone());
         self.reveal = heading.map(|heading| (item.clone(), heading));
         self.selections.insert(self.space(), selection_of(&item));
         self.open_items.insert(self.space(), item.clone());
@@ -526,6 +569,47 @@ impl AppModel {
             // the other Space or editor mode.
             eprintln!("sett: couldn't save settings to {}: {err}", path.display());
         }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Direction {
+    Back,
+    Forward,
+}
+
+/// The Items opened in one Space, oldest first, and which one is current.
+#[derive(Default)]
+struct History {
+    entries: Vec<ItemId>,
+    current: usize,
+}
+
+impl History {
+    fn visit(&mut self, item: ItemId) {
+        if self.entries.get(self.current) == Some(&item) {
+            return;
+        }
+        if !self.entries.is_empty() {
+            self.entries.truncate(self.current + 1);
+        }
+        self.entries.push(item);
+        self.current = self.entries.len() - 1;
+    }
+
+    /// Moves to the nearest entry in `direction` that `exists` and returns it.
+    fn step(&mut self, direction: Direction, exists: impl Fn(&ItemId) -> bool) -> Option<ItemId> {
+        let target = match direction {
+            Direction::Back => self.entries[..self.current].iter().rposition(&exists),
+            Direction::Forward => self
+                .entries
+                .iter()
+                .skip(self.current + 1)
+                .position(exists)
+                .map(|offset| self.current + 1 + offset),
+        }?;
+        self.current = target;
+        Some(self.entries[target].clone())
     }
 }
 

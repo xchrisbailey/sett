@@ -122,12 +122,12 @@ impl CenterPanel {
             self.journal
                 .update(cx, |journal, cx| journal.flush(window, cx));
             if selection == Selection::Journal && !matches!(opening, Some(ItemId::Journal(_))) {
-                let today = ItemRef::Journal {
-                    space,
-                    date: today(),
-                };
+                let date = today();
+                let today = ItemRef::Journal { space, date };
                 self.journal
                     .update(cx, |journal, cx| journal.open(today, window, cx));
+                self.model
+                    .update(cx, |model, _| model.record_visit(ItemId::Journal(date)));
             }
         }
     }
