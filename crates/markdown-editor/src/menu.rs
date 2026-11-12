@@ -21,16 +21,23 @@ const ANCHOR_GAP: Pixels = px(4.);
 /// The closest a menu comes to the window's edges.
 const WINDOW_MARGIN: Pixels = px(8.);
 
-/// An open menu: the block it belongs to and its highlighted option.
+/// An open menu: the block it belongs to, its highlighted option and, for a
+/// menu that filters by typed text (the Language Menu), that query. Holding
+/// the query here means it can't outlive the menu.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct OpenMenu {
     pub(crate) block: BlockId,
     pub(crate) highlighted: usize,
+    pub(crate) query: String,
 }
 
 impl OpenMenu {
     pub(crate) fn new(block: BlockId, highlighted: usize) -> Self {
-        Self { block, highlighted }
+        Self {
+            block,
+            highlighted,
+            query: String::new(),
+        }
     }
 
     /// Move the highlight down (`forward`) or up among `count` options,

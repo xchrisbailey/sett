@@ -117,7 +117,6 @@ impl BlockEditorState {
         self.callout_menu = None;
         self.link_picker = None;
         self.close_table_menu(cx);
-        self.language_query.clear();
         let highlighted = rows("")
             .iter()
             .position(|row| row.is_current(lang.as_deref()))
@@ -180,23 +179,28 @@ impl BlockEditorState {
 
     /// Move the highlight down (`forward`) or up, wrapping at the ends.
     pub(crate) fn language_menu_move(&mut self, forward: bool, cx: &mut Context<Self>) {
-        let count = rows(&self.language_query).len();
+        let Some(menu) = &self.language_menu else {
+            return;
+        };
+        let count = rows(&menu.query).len();
         self.step_menu(MenuSlot::Language, forward, count, cx);
     }
 
     /// Typed text joins the query and puts the highlight on the first row.
     pub(crate) fn language_query_type(&mut self, text: &str, cx: &mut Context<Self>) {
-        self.language_query.push_str(text);
+        if let Some(menu) = self.language_menu.as_mut() {
+            menu.query.push_str(text);
+        }
         self.reset_language_highlight(cx);
     }
 
     /// Backspace drops the query's last character. Returns whether the menu
     /// took the key.
     pub(crate) fn language_query_backspace(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.language_menu.is_none() {
+        let Some(menu) = self.language_menu.as_mut() else {
             return false;
-        }
-        self.language_query.pop();
+        };
+        menu.query.pop();
         self.reset_language_highlight(cx);
         true
     }
@@ -212,16 +216,18 @@ impl BlockEditorState {
     /// the caret where it is. A row that is gone (the query moved on) does
     /// nothing.
     pub(crate) fn language_menu_pick(&mut self, ix: usize, cx: &mut Context<Self>) {
-        let query = self.language_query.clone();
-        let rows = rows(&query);
+        let Some(menu) = self.language_menu.as_ref() else {
+            return;
+        };
+        let rows = rows(&menu.query);
         let Some(row) = rows.get(ix) else {
             return;
         };
+        let lang = row.lang();
         let Some(menu) = self.language_menu.take() else {
             return;
         };
         cx.notify();
-        let lang = row.lang();
         if self.code_lang(menu.block).is_none_or(|old| old == lang) {
             return;
         }
@@ -266,7 +272,7 @@ pub(crate) fn render(
     let at = s.language_menu_anchor()?;
     let current = s.code_lang(menu.block)?;
     let highlighted = menu.highlighted;
-    let query = s.language_query.as_str();
+    let query = menu.query.as_str();
     let theme = cx.theme();
     let muted = theme.muted_foreground;
 

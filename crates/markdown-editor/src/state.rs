@@ -553,9 +553,8 @@ pub struct BlockEditorState {
     pub(crate) insert_menu_options: Vec<super::insert_menu::InsertMenuOption>,
     /// FORK: the open Callout type menu.
     pub(crate) callout_menu: Option<super::menu::OpenMenu>,
-    /// FORK: the open Language Menu (`language_menu.rs`) and its query.
+    /// FORK: the open Language Menu (`language_menu.rs`), query included.
     pub(crate) language_menu: Option<super::menu::OpenMenu>,
-    pub(crate) language_query: String,
     /// FORK: the open Link Picker, what it is matching, and its candidates.
     pub(crate) link_picker: Option<super::menu::OpenMenu>,
     pub(crate) link_query: super::link_picker::LinkQuery,
@@ -651,7 +650,6 @@ impl BlockEditorState {
             insert_menu_options: super::insert_menu::InsertMenuOption::defaults(),
             callout_menu: None,
             language_menu: None,
-            language_query: String::new(),
             link_picker: None,
             link_query: Default::default(),
             link_candidates: Vec::new().into(),
