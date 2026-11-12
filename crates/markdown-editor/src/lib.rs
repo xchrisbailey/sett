@@ -64,7 +64,9 @@ mod input_rule;
 mod insert_menu;
 mod kind;
 mod markdown_source;
+// FORK: Links drawn as title chips.
 mod marks;
+mod wiki_chip;
 // FORK: what the Insert Menu and the Callout type menu share.
 mod menu;
 mod order;
