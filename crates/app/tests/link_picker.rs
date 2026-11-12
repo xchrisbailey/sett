@@ -13,8 +13,6 @@ use gpui_kit::{AppContext as _, Role, TestAppContext};
 use sett::Selection;
 use sett_store::{Change, ItemId};
 
-/// Longer than the autosave delay.
-
 /// A Space with a few Items, then the Note "Plan" open with the caret on a
 /// new empty line under its first line.
 fn on_a_new_line(cx: &mut TestAppContext) -> (Fixture, PathBuf) {
