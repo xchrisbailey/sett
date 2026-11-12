@@ -33,6 +33,9 @@ const TOP_PADDING: f32 = 28.;
 /// Labels drawn this frame, by Code Block, in window coordinates.
 pub(crate) type LabelSink = Rc<RefCell<Vec<(BlockId, Bounds<Pixels>)>>>;
 
+/// Fence names that mean "no language", on purpose.
+const PLAIN_NAMES: [&str; 4] = ["text", "plain", "plaintext", "txt"];
+
 /// What a Code Block's label says.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Label {
@@ -48,11 +51,12 @@ impl Label {
     pub(crate) fn of(lang: Option<&str>) -> Self {
         match lang.filter(|l| !l.is_empty()) {
             None => Label::PlainText,
-            Some(l) => match language::display_name(l) {
-                Some(name) => Label::Known(name.to_string()),
-                None if language::highlights(l) => Label::Known(l.to_string()),
-                None => Label::Unknown(l.to_string()),
-            },
+            // Plain on purpose (decision #60), not an unknown language.
+            Some(l) if PLAIN_NAMES.iter().any(|p| p.eq_ignore_ascii_case(l)) => Label::PlainText,
+            // Highlighting decides first: a search-only alias such as `shell`
+            // has a display name but still won't highlight.
+            Some(l) if !language::highlights(l) => Label::Unknown(l.to_string()),
+            Some(l) => Label::Known(language::display_name(l).unwrap_or(l).to_string()),
         }
     }
 
@@ -121,14 +125,18 @@ pub(crate) fn render(code_box: CodeBox, window: &mut Window, cx: &mut App) -> An
     };
 
     // Covers gpui-base's own label, which has no switch. Only a block with a
-    // language has one.
+    // language has one. The top padding is empty, so the patch is a strip
+    // across the block inside its border, as tall as that padding: a long
+    // language name can't leak out to the left of a fixed-width box.
+    // FORK: a `code_block()` background refinement would need this patch to
+    // follow it, since it takes `code_background()` as the block's fill.
     let patch = lang.as_deref().is_some_and(|l| !l.is_empty()).then(|| {
         div()
             .absolute()
             .top(px(1.))
+            .left(px(1.))
             .right(px(1.))
-            .h(px(TOP_PADDING - 2.))
-            .w(px(180.))
+            .h(px(TOP_PADDING))
             .bg(node_cx.style().code_background())
     });
 
@@ -144,7 +152,7 @@ pub(crate) fn render(code_box: CodeBox, window: &mut Window, cx: &mut App) -> An
         .test_support()
         .aria_label(label.aria())
         // Not a tab stop, like the Callout header: the editor owns the one
-        // focus and #67 adds the `cmd-alt-l` route.
+        // focus and `cmd-alt-l` is the keyboard route.
         .tooltip(move |window, cx| {
             Tooltip::new(tip.clone())
                 .action(&crate::state::OpenLanguageMenu, Some(crate::state::CONTEXT))
@@ -199,5 +207,18 @@ mod tests {
         // Highlights but isn't in the curated list: as written.
         assert_eq!(Label::of(Some("haskell")), Label::Known("haskell".into()));
         assert_eq!(Label::of(Some("foo")), Label::Unknown("foo".into()));
+    }
+
+    #[test]
+    fn a_search_only_alias_reads_as_unknown() {
+        // `shell` finds Bash in the menu but doesn't highlight.
+        assert_eq!(Label::of(Some("shell")), Label::Unknown("shell".into()));
+    }
+
+    #[test]
+    fn plain_on_purpose_names_read_plain_text() {
+        for name in ["text", "plain", "plaintext", "txt", "Text", "PLAINTEXT"] {
+            assert_eq!(Label::of(Some(name)), Label::PlainText, "{name}");
+        }
     }
 }
