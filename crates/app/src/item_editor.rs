@@ -159,6 +159,11 @@ impl ItemEditor {
                         this.refresh_link_data(cx);
                         this.edited(window, cx);
                     }
+                    BlockEditorEvent::LinkClicked { url } => {
+                        if let Some(url) = openable_url(url) {
+                            cx.open_url(url);
+                        }
+                    }
                     BlockEditorEvent::WikiLinkClicked { slug, heading } => {
                         this.follow_link(slug, heading.as_deref(), window, cx);
                     }
@@ -697,5 +702,57 @@ impl Render for ItemEditor {
             .child(self.render_body(cx))
             .child(ItemLinks::new(self.model.clone(), item.id()))
             .into_any_element()
+    }
+}
+
+/// The URL to hand the system opener for a clicked link, or `None` when it
+/// isn't a web or mail link. A file can hold any scheme; only these may launch.
+pub(crate) fn openable_url(url: &str) -> Option<&str> {
+    let url = url.trim();
+    let (scheme, rest) = url.split_once(':')?;
+    let rest = match scheme.to_ascii_lowercase().as_str() {
+        "http" | "https" => rest.strip_prefix("//")?,
+        "mailto" => rest,
+        _ => return None,
+    };
+    (!rest.is_empty()).then_some(url)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::openable_url;
+
+    #[test]
+    fn opens_web_and_mail_links() {
+        for url in [
+            "https://example.com",
+            "http://example.com/a?b=1",
+            "HTTPS://Example.com",
+            "mailto:a@b.co",
+        ] {
+            assert_eq!(openable_url(url), Some(url));
+        }
+        assert_eq!(
+            openable_url("  https://example.com \n"),
+            Some("https://example.com")
+        );
+    }
+
+    #[test]
+    fn ignores_other_schemes_and_empty_targets() {
+        for url in [
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "ssh://host",
+            "x-apple.systempreferences:",
+            "/relative/path",
+            "example.com",
+            "https:",
+            "https://",
+            "mailto:",
+            "",
+        ] {
+            assert_eq!(openable_url(url), None, "{url}");
+        }
     }
 }
