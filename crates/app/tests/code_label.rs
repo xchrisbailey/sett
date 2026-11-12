@@ -62,6 +62,24 @@ fn the_label_reads_the_display_name_plain_text_or_the_unknown_name(cx: &mut Test
 }
 
 #[gpui_kit::test]
+fn only_an_unknown_language_carries_the_dot(cx: &mut TestAppContext) {
+    let dot = |cx: &mut TestAppContext, f: &Fixture| {
+        cx.update_window(f.window, |_, window, cx| {
+            window.render_frame(cx);
+            window
+                .within("note-body")
+                .try_find("code-language-unknown-dot")
+                .is_some()
+        })
+        .unwrap()
+    };
+    let (f, _) = open_note(cx, "```foo\nodd\n```\n");
+    assert!(dot(cx, &f));
+    let (f, _) = open_note(cx, "```rust\nlet a = 1;\n```\n");
+    assert!(!dot(cx, &f));
+}
+
+#[gpui_kit::test]
 fn the_full_language_name_reads_the_same(cx: &mut TestAppContext) {
     let (f, _) = open_note(cx, "```rust\nlet a = 1;\n```\n");
     assert!(has(cx, &f, "Language: Rust"));

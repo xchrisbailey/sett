@@ -170,7 +170,14 @@ pub(crate) fn render(code_box: CodeBox, window: &mut Window, cx: &mut App) -> An
         .text_color(text_color)
         .hover(move |this| this.bg(hover_bg).text_color(hover_fg))
         .when(unknown, |this| {
-            this.child(div().size(px(6.)).rounded_full().bg(warning))
+            this.child(
+                div()
+                    .id("code-language-unknown-dot")
+                    .test_support()
+                    .size(px(6.))
+                    .rounded_full()
+                    .bg(warning),
+            )
         })
         .child(label.text().to_string())
         .child(Icon::default().data(ICON_CHEVRON).xsmall())
