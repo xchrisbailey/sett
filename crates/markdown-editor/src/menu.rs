@@ -104,6 +104,29 @@ impl BlockEditorState {
         }
     }
 
+    /// Close the menus that belong to the document as it was when they
+    /// opened: an edit or a caret move leaves them stale. The Insert Menu and
+    /// Link Picker instead refilter (`sync_insert_menu`, `sync_link_picker`).
+    pub(crate) fn close_block_menus(&mut self) {
+        self.callout_menu = None;
+        self.language_menu = None;
+    }
+
+    /// Close the editor's four menus (not the table menu, which is gpui-kit's
+    /// popup and takes focus when it opens, so blur must leave it alone).
+    pub(crate) fn close_editor_menus(&mut self) {
+        self.insert_menu = None;
+        self.link_picker = None;
+        self.close_block_menus();
+    }
+
+    /// Close every menu, the table menu included. Each menu opener calls it
+    /// first, so only one is ever open.
+    pub(crate) fn close_all_menus(&mut self, cx: &mut Context<Self>) {
+        self.close_editor_menus();
+        self.close_table_menu(cx);
+    }
+
     pub(crate) fn close_menu(&mut self, slot: MenuSlot, cx: &mut Context<Self>) {
         if self.menu_slot(slot).take().is_some() {
             cx.notify();

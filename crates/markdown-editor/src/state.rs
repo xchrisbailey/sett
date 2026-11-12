@@ -592,10 +592,7 @@ impl BlockEditorState {
                 this.model.break_coalescing();
                 this.end_composition();
                 // FORK: blur closes the menus.
-                this.insert_menu = None;
-                this.callout_menu = None;
-                this.language_menu = None;
-                this.link_picker = None;
+                this.close_editor_menus();
                 cx.emit(BlockEditorEvent::Blur);
             }),
             cx.observe_window_activation(window, |this, window, cx| {
@@ -1148,8 +1145,7 @@ impl BlockEditorState {
         // document as it was when it opened, so it closes.
         self.sync_insert_menu();
         self.sync_link_picker(true);
-        self.callout_menu = None;
-        self.language_menu = None;
+        self.close_block_menus();
         self.goal_x = None;
         self.reveal.set(true);
         self.pause_blink(cx);
@@ -1166,8 +1162,7 @@ impl BlockEditorState {
         // the caret leaves its paragraph.
         self.sync_insert_menu();
         self.sync_link_picker(false);
-        self.callout_menu = None;
-        self.language_menu = None;
+        self.close_block_menus();
         self.reveal.set(true);
         self.pause_blink(cx);
         cx.emit(BlockEditorEvent::SelectionChanged);

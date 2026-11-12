@@ -47,9 +47,7 @@ impl BlockEditorState {
             return;
         }
         self.end_composition();
-        self.insert_menu = None;
-        self.language_menu = None;
-        self.close_table_menu(cx);
+        self.close_all_menus(cx);
         let highlighted = CALLOUT_TYPES
             .iter()
             .position(|option| *option == Some(kind))

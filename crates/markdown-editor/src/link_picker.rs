@@ -244,6 +244,7 @@ impl BlockEditorState {
             text: String::new(),
             pending: None,
         };
+        self.close_all_menus(cx);
         self.link_picker = Some(OpenMenu::new(caret.block, 0));
         let first = self.first_pickable_link_row();
         if let Some(menu) = &mut self.link_picker {

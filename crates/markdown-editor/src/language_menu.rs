@@ -113,10 +113,7 @@ impl BlockEditorState {
             return;
         }
         self.end_composition();
-        self.insert_menu = None;
-        self.callout_menu = None;
-        self.link_picker = None;
-        self.close_table_menu(cx);
+        self.close_all_menus(cx);
         let highlighted = rows("")
             .iter()
             .position(|row| row.is_current(lang.as_deref()))

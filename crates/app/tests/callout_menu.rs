@@ -116,6 +116,16 @@ fn clicking_the_header_opens_it_and_arrows_and_enter_change_the_type(cx: &mut Te
 }
 
 #[gpui_kit::test]
+fn opening_it_closes_the_link_picker(cx: &mut TestAppContext) {
+    let (f, _) = open_note(cx, "> [!NOTE]\n> Body\n");
+    input(cx, &f, " [[");
+    assert!(common::has_label(cx, &f, "Link Picker"));
+    press(cx, &f, SHORTCUT);
+    assert!(menu_open(cx, &f));
+    assert!(!common::has_label(cx, &f, "Link Picker"));
+}
+
+#[gpui_kit::test]
 fn the_shortcut_opens_it_and_plain_quote_saves_a_plain_quote(cx: &mut TestAppContext) {
     let (f, path) = open_note(cx, "> [!NOTE]\n> Body\n");
     press(cx, &f, SHORTCUT);

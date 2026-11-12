@@ -211,6 +211,7 @@ impl BlockEditorState {
         {
             return;
         }
+        self.close_all_menus(cx);
         self.insert_menu = Some(OpenMenu::new(caret.block, 0));
         cx.notify();
     }
