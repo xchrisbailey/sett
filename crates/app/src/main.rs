@@ -6,7 +6,7 @@ use sett::{
     AppModel, ArchiveProject, DeleteProject, EditProject, NewProject, Shell, ShowPersonal,
     ShowWork, ToggleEditorMode, UnarchiveProject,
 };
-use sett_store::Settings;
+use sett_store::{LinkTarget, Settings};
 
 actions!(sett, [Quit]);
 
@@ -58,10 +58,26 @@ fn main() {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             ..TitleBar::window_options()
         };
+        let shell_model = model.clone();
         open_window(options, cx, |window, cx| {
-            cx.new(|cx| Shell::new(model, window, cx))
+            cx.new(|cx| Shell::new(shell_model, window, cx))
         })
         .expect("failed to open window");
+        if let Some(slug) = open_arg() {
+            // After the Shell exists, so it sees the open request.
+            model.update(cx, |m, cx| match m.index().resolve(&slug) {
+                LinkTarget::Found { item, .. } => m.open_item(item, cx),
+                LinkTarget::Broken => eprintln!("sett: --open {slug}: no such Item"),
+            });
+        }
         cx.activate(true);
     });
+}
+
+/// The Item slug after `--open`, which opens that Item in the last used Space
+/// at launch. `scripts/screenshot` uses it to capture an Item's body.
+fn open_arg() -> Option<String> {
+    let mut args = std::env::args().skip_while(|arg| arg != "--open");
+    args.next()?;
+    args.next()
 }

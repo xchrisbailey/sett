@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Every file that crates/markdown-editor/FORK.md names under "Patches we carry"
+# must carry a `FORK` comment at its patched spots. Checks at least one.
+set -euo pipefail
+
+root="$(cd "$(dirname "$0")/.." && pwd)"
+crate="$root/crates/markdown-editor"
+
+files="$(sed -n '/^## Patches we carry/,/^## /p' "$crate/FORK.md" |
+    grep -o '`[a-z_/]*\.rs`' | tr -d '`' | sort -u)"
+
+missing=0
+for file in $files; do
+    path="$crate/src/$file"
+    [[ -f "$path" ]] || path="$crate/$file"
+    if [[ ! -f "$path" ]]; then
+        echo "FORK.md names $file, which doesn't exist" >&2
+        missing=1
+    elif ! grep -q 'FORK' "$path"; then
+        echo "$file is listed in FORK.md but has no FORK comment" >&2
+        missing=1
+    fi
+done
+exit "$missing"
