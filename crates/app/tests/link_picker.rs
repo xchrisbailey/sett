@@ -12,7 +12,7 @@ use common::{Fixture, click_label, open_shell};
 use gpui_kit::test::{TestQueryExt as _, TestWindowExt as _};
 use gpui_kit::{AppContext as _, Role, TestAppContext};
 use sett::Selection;
-use sett_store::Change;
+use sett_store::{Change, ItemId};
 
 /// Longer than the autosave delay.
 const AFTER_AUTOSAVE: Duration = Duration::from_secs(2);
@@ -260,11 +260,11 @@ fn an_empty_query_lists_the_most_recently_changed_first(cx: &mut TestAppContext)
 fn typing_filters_by_title_and_by_slug(cx: &mut TestAppContext) {
     let (f, _) = on_a_new_line(cx);
     input(cx, &f, "[[GARD");
-    assert_eq!(rows(cx, &f), ["Garden"]);
+    assert_eq!(rows(cx, &f), ["Garden", &create_row("GARD")]);
     press(cx, &f, "backspace backspace backspace backspace");
     // The slug `quick-start` matches though the title has no hyphen.
     input(cx, &f, "k-st");
-    assert_eq!(rows(cx, &f), ["Quick start"]);
+    assert_eq!(rows(cx, &f), ["Quick start", &create_row("k-st")]);
 }
 
 #[gpui_kit::test]
@@ -273,7 +273,15 @@ fn title_prefix_matches_come_first_then_the_most_recent(cx: &mut TestAppContext)
     input(cx, &f, "[[qu");
     // Prefix matches (Quick start is newer than Quotes), then "Ideas on
     // quotes", which merely contains the query.
-    assert_eq!(rows(cx, &f), ["Quick start", "Quotes", "Ideas on quotes"]);
+    assert_eq!(
+        rows(cx, &f),
+        [
+            "Quick start",
+            "Quotes",
+            "Ideas on quotes",
+            &create_row("qu")
+        ]
+    );
 }
 
 #[gpui_kit::test]
@@ -298,8 +306,9 @@ fn tab_picks_the_highlighted_item(cx: &mut TestAppContext) {
 fn arrows_wrap_around(cx: &mut TestAppContext) {
     let (f, path) = on_a_new_line(cx);
     input(cx, &f, "[[qu");
-    // Up from the first row wraps to the last: "Ideas on quotes".
-    press(cx, &f, "up enter");
+    // Up from the first row wraps to the last, the create row, then up once
+    // more is "Ideas on quotes".
+    press(cx, &f, "up up enter");
     assert_eq!(saved_body(cx, &path), "First line\n\n[[ideas]]\n");
 }
 
@@ -358,10 +367,14 @@ fn moving_the_caret_out_closes_it(cx: &mut TestAppContext) {
 fn an_unreachable_row_is_dimmed_with_a_hint_and_cannot_be_picked(cx: &mut TestAppContext) {
     let (f, path) = on_a_new_line(cx);
     input(cx, &f, "[[shared");
-    assert_eq!(rows(cx, &f), ["Shared top", "Shared nested"]);
+    assert_eq!(
+        rows(cx, &f),
+        ["Shared top", "Shared nested", &create_row("shared")]
+    );
     assert!(has_label(cx, &f, "Another Item has the slug `shared`"));
-    // Down skips the unreachable row, so the highlight stays on the first.
-    press(cx, &f, "down");
+    // Down skips the unreachable row to the create row, and again wraps back
+    // to the first.
+    press(cx, &f, "down down");
     cx.update_window(f.window, |_, window, cx| {
         window.render_frame(cx);
         click_label(
@@ -379,9 +392,9 @@ fn an_unreachable_row_is_dimmed_with_a_hint_and_cannot_be_picked(cx: &mut TestAp
 }
 
 #[gpui_kit::test]
-fn no_match_shows_a_message_and_stays_open(cx: &mut TestAppContext) {
+fn a_blank_query_with_no_match_shows_a_message_and_stays_open(cx: &mut TestAppContext) {
     let (f, path) = on_a_new_line(cx);
-    input(cx, &f, "[[zzz");
+    input(cx, &f, "[[   ");
     assert!(picker_open(cx, &f));
     assert!(has_label(cx, &f, "No matching Items"));
     // Backspacing brings the rows back.
@@ -389,4 +402,157 @@ fn no_match_shows_a_message_and_stays_open(cx: &mut TestAppContext) {
     assert!(!has_label(cx, &f, "No matching Items"));
     assert!(picker_open(cx, &f));
     assert_eq!(saved_body(cx, &path), "First line\n\n\\[\\[\n");
+}
+
+fn create_row(query: &str) -> String {
+    format!("Create Note \"{query}\"")
+}
+
+fn names_in(dir: PathBuf) -> Vec<String> {
+    let mut names: Vec<String> = fs::read_dir(dir)
+        .map(|rd| {
+            rd.filter_map(|e| e.ok())
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .collect()
+        })
+        .unwrap_or_default();
+    names.sort();
+    names
+}
+
+/// Opens `item` with the caret on a new empty line at the end of its body.
+fn open_with_caret_on_new_line(cx: &mut TestAppContext, f: &Fixture, item: ItemId) {
+    let model = f.model(cx);
+    cx.update(|cx| model.update(cx, |w, cx| w.open_item(item, cx)));
+    cx.run_until_parked();
+    cx.update_window(f.window, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("note-body", cx);
+        window.press("secondary-down", cx);
+        window.press("enter", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+}
+
+#[gpui_kit::test]
+fn the_create_row_is_last_and_follows_the_query(cx: &mut TestAppContext) {
+    let (f, _) = on_a_new_line(cx);
+    // Partial matches come first, the create row last.
+    input(cx, &f, "[[qu");
+    assert_eq!(
+        rows(cx, &f),
+        [
+            "Quick start",
+            "Quotes",
+            "Ideas on quotes",
+            &create_row("qu")
+        ]
+    );
+    // An exact title match, ignoring case, hides it.
+    input(cx, &f, "otes");
+    assert_eq!(rows(cx, &f), ["Quotes", "Ideas on quotes"]);
+    // With nothing matching it replaces "No matching Items".
+    input(cx, &f, "zz");
+    assert_eq!(rows(cx, &f), [create_row("quoteszz")]);
+    assert!(!has_label(cx, &f, "No matching Items"));
+}
+
+#[gpui_kit::test]
+fn a_blank_query_offers_no_create_row(cx: &mut TestAppContext) {
+    let (f, _) = on_a_new_line(cx);
+    input(cx, &f, "[[");
+    assert!(!rows(cx, &f).iter().any(|r| r.starts_with("Create Note")));
+}
+
+#[gpui_kit::test]
+fn creating_from_a_space_level_note_makes_a_space_level_note(cx: &mut TestAppContext) {
+    let (f, path) = on_a_new_line(cx);
+    input(cx, &f, "see [[Budget 2027");
+    press(cx, &f, "enter");
+    assert!(!picker_open(cx, &f));
+    let text = fs::read_to_string(f.data_root.join("personal/notes/budget-2027.md")).unwrap();
+    assert!(text.contains("title: Budget 2027"), "{text}");
+    assert_eq!(saved_body(cx, &path), "First line\n\nsee [[budget-2027]]\n");
+}
+
+#[gpui_kit::test]
+fn creating_from_a_task_makes_a_note_in_its_project(cx: &mut TestAppContext) {
+    let (f, _) = on_a_new_line(cx);
+    open_with_caret_on_new_line(
+        cx,
+        &f,
+        ItemId::Task {
+            project: "kitchen-reno".into(),
+            slug: "measure".into(),
+        },
+    );
+    input(cx, &f, "[[Paint colours");
+    press(cx, &f, "enter");
+    let note = f
+        .data_root
+        .join("personal/projects/kitchen-reno/notes/paint-colours.md");
+    let text = fs::read_to_string(note).unwrap();
+    assert!(text.contains("title: Paint colours"), "{text}");
+    assert!(!f.data_root.join("personal/notes/paint-colours.md").exists());
+    // The Task stays open and holds the Link.
+    let task = f
+        .data_root
+        .join("personal/projects/kitchen-reno/tasks/measure.md");
+    assert!(saved_body(cx, &task).contains("[[paint-colours]]"));
+    cx.update_window(f.window, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("task-view").is_some());
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn creating_from_a_journal_entry_makes_a_space_level_note(cx: &mut TestAppContext) {
+    let (f, _) = on_a_new_line(cx);
+    let date = sett_store::Date::parse("2026-11-02").unwrap();
+    write(
+        cx,
+        &f,
+        "journal/2026-11-02.md",
+        "Today\n",
+        900,
+        Change::Journal(date),
+    );
+    open_with_caret_on_new_line(cx, &f, ItemId::Journal(date));
+    input(cx, &f, "[[Paint colours");
+    press(cx, &f, "enter");
+    assert!(f.data_root.join("personal/notes/paint-colours.md").exists());
+    let entry = f.data_root.join("personal/journal/2026-11-02.md");
+    assert!(saved_body(cx, &entry).contains("[[paint-colours]]"));
+}
+
+#[gpui_kit::test]
+fn one_undo_removes_only_the_link_and_the_note_stays(cx: &mut TestAppContext) {
+    let (f, path) = on_a_new_line(cx);
+    input(cx, &f, "[[Paint colours");
+    press(cx, &f, "enter");
+    press(cx, &f, "secondary-z");
+    assert_eq!(saved_body(cx, &path), "First line\n\n\\[\\[Paint colours\n");
+    assert!(names_in(f.data_root.join("personal/notes")).contains(&"paint-colours.md".to_string()));
+}
+
+#[gpui_kit::test]
+fn the_current_item_stays_open_and_the_chip_row_lists_the_new_note(cx: &mut TestAppContext) {
+    let (f, _) = on_a_new_line(cx);
+    input(cx, &f, "[[Paint colours");
+    press(cx, &f, "enter");
+    cx.executor().advance_clock(AFTER_AUTOSAVE);
+    cx.run_until_parked();
+    cx.update_window(f.window, |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(window.find("note-title").value(), Some("Plan"));
+        assert!(
+            window
+                .within("outgoing-links")
+                .try_find_by_label("Paint colours")
+                .is_some()
+        );
+    })
+    .unwrap();
 }

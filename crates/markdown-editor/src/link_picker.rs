@@ -21,6 +21,7 @@ use super::{
     menu::{self, MenuSlot, OpenMenu},
     position::BlockPosition,
     selection::BlockSelection,
+    state::BlockEditorEvent,
     state::BlockEditorState,
     transaction::EditOrigin,
 };
@@ -32,6 +33,8 @@ pub(crate) struct LinkQuery {
     pub(crate) trigger: usize,
     pub(crate) end: usize,
     pub(crate) text: String,
+    /// The block of a Create Note request the host hasn't answered yet.
+    pub(crate) pending: Option<BlockId>,
 }
 
 /// One Item the Link Picker can insert a Link to.
@@ -167,17 +170,37 @@ impl BlockEditorState {
         self.link_picker.as_ref().map(|m| m.highlighted)
     }
 
-    /// Whether row `ix` can be highlighted and picked.
+    /// The title of the Note the last row offers to create: the trimmed
+    /// query, unless it is empty or some Item's title equals it, ignoring
+    /// case.
+    pub fn link_picker_create_title(&self) -> Option<String> {
+        let query = self.link_picker_query()?.trim();
+        let lower = query.to_lowercase();
+        (!query.is_empty()
+            && !self
+                .link_candidates
+                .iter()
+                .any(|c| c.title.to_lowercase() == lower))
+        .then(|| query.to_string())
+    }
+
+    /// The number of rows: the matches, then the create row if offered.
+    fn link_row_count(&self) -> usize {
+        self.link_picker_matches().len() + usize::from(self.link_picker_create_title().is_some())
+    }
+
+    /// Whether row `ix` can be highlighted and picked. The create row can.
     pub(crate) fn link_row_pickable(&self, ix: usize) -> bool {
-        self.link_picker_matches()
-            .get(ix)
-            .is_some_and(|c| c.reachable)
+        let matches = self.link_picker_matches();
+        match matches.get(ix) {
+            Some(c) => c.reachable,
+            None => ix == matches.len() && self.link_picker_create_title().is_some(),
+        }
     }
 
     fn first_pickable_link_row(&self) -> usize {
-        self.link_picker_matches()
-            .iter()
-            .position(|c| c.reachable)
+        (0..self.link_row_count())
+            .find(|&ix| self.link_row_pickable(ix))
             .unwrap_or(0)
     }
 
@@ -210,6 +233,7 @@ impl BlockEditorState {
             trigger,
             end: caret.offset,
             text: String::new(),
+            pending: None,
         };
         self.link_picker = Some(OpenMenu::new(caret.block, 0));
         let first = self.first_pickable_link_row();
@@ -269,12 +293,7 @@ impl BlockEditorState {
         let Some(from) = self.link_picker_highlighted() else {
             return;
         };
-        let reachable: Vec<bool> = self
-            .link_picker_matches()
-            .iter()
-            .map(|c| c.reachable)
-            .collect();
-        let count = reachable.len();
+        let count = self.link_row_count();
         let mut ix = from;
         for _ in 0..count {
             ix = if forward {
@@ -282,7 +301,7 @@ impl BlockEditorState {
             } else {
                 (ix + count - 1) % count
             };
-            if reachable[ix] {
+            if self.link_row_pickable(ix) {
                 if let Some(menu) = &mut self.link_picker {
                     menu.highlighted = ix;
                 }
@@ -299,8 +318,23 @@ impl BlockEditorState {
         if self.composition_in_progress() {
             return;
         }
-        let Some(slug) = self
-            .link_picker_matches()
+        let matches = self.link_picker_matches();
+        if ix == matches.len()
+            && let Some(title) = self.link_picker_create_title()
+        {
+            // The text stays as typed until the host answers with
+            // `complete_link_pick`; if it never does, nothing is lost.
+            let Some(menu) = self.link_picker.take() else {
+                return;
+            };
+            self.link_query.pending = Some(menu.block);
+            cx.emit(BlockEditorEvent::CreateLinkTargetRequested {
+                title: title.into(),
+            });
+            cx.notify();
+            return;
+        }
+        let Some(slug) = matches
             .get(ix)
             .filter(|c| c.reachable)
             .map(|c| c.slug.clone())
@@ -312,6 +346,31 @@ impl BlockEditorState {
         };
         self.model
             .apply_link_pick(menu.block, self.link_query.trigger, &slug);
+        self.after_edit(EditOrigin::Command("link_picker"), cx);
+    }
+
+    /// Answer a [`BlockEditorEvent::CreateLinkTargetRequested`]: replace the
+    /// typed `[[query` with `[[slug]]`, as one undo step, exactly as a normal
+    /// pick does. Does nothing if the host never asked, or the typed text has
+    /// since moved or changed.
+    pub fn complete_link_pick(&mut self, slug: &str, cx: &mut Context<Self>) {
+        let Some(block) = self.link_query.pending.take() else {
+            return;
+        };
+        let trigger = self.link_query.trigger;
+        let intact = self
+            .model
+            .doc
+            .leaf_text(block)
+            .is_some_and(|t| t.get(trigger..trigger + 2) == Some("[["))
+            && self
+                .model
+                .caret()
+                .is_some_and(|c| c.block == block && c.offset >= trigger + 2);
+        if self.readonly || !intact {
+            return;
+        }
+        self.model.apply_link_pick(block, trigger, slug);
         self.after_edit(EditOrigin::Command("link_picker"), cx);
     }
 
@@ -391,7 +450,8 @@ pub(crate) fn render(
         .max_h(px(236.))
         .overflow_y_scroll()
         .track_scroll(&s.link_scroll);
-    let list = if rows.is_empty() {
+    let create = s.link_picker_create_title();
+    let list = if rows.is_empty() && create.is_none() {
         list.child(
             div()
                 .id("link-picker-empty")
@@ -404,6 +464,7 @@ pub(crate) fn render(
                 .child("No matching Items"),
         )
     } else {
+        let create_ix = rows.len();
         list.children(rows.into_iter().enumerate().map(|(ix, c)| {
             let on = ix == highlighted && c.reachable;
             let hint = format!("Another Item has the slug `{}`", c.slug);
@@ -433,6 +494,19 @@ pub(crate) fn render(
                     )
                 })
                 .into_any_element()
+        }))
+        .children(create.map(|title| {
+            let on = highlighted == create_ix;
+            menu::option_row(
+                state,
+                MenuSlot::Link,
+                create_ix,
+                format!("Create Note \"{title}\""),
+                on,
+                cx,
+            )
+            .child(format!("Create Note \"{title}\""))
+            .into_any_element()
         }))
     };
     Some(menu::popover(
