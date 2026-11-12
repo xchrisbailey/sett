@@ -13,7 +13,7 @@ use std::cmp::Reverse;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use gpui::{Context, Pixels, Point, SharedString, px};
+use gpui::{Context, Pixels, Point, SharedString, px, rems};
 
 use super::{
     editor::BlockEditorModel,
@@ -25,6 +25,9 @@ use super::{
     state::BlockEditorState,
     transaction::EditOrigin,
 };
+
+/// The tallest the list grows before it scrolls (about eight rows).
+const MAX_HEIGHT_REMS: f32 = 14.75;
 
 /// What the Link Picker is open on: the offset of the first `[` of the typed
 /// `[[`, the last offset the query ran to, and the query last matched.
@@ -139,8 +142,14 @@ impl BlockEditorModel {
 impl BlockEditorState {
     /// Fill the Link Picker's list. The host calls this whenever its Items
     /// change.
-    pub fn set_link_candidates(&mut self, candidates: Arc<[LinkCandidate]>) {
+    /// An open picker redraws with the new list.
+    pub fn set_link_candidates(
+        &mut self,
+        candidates: Arc<[LinkCandidate]>,
+        cx: &mut Context<Self>,
+    ) {
         self.link_candidates = candidates;
+        cx.notify();
     }
 
     /// Whether the Link Picker is open.
@@ -398,8 +407,14 @@ impl BlockEditorState {
         _: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(ix) = self.link_picker_highlighted() {
-            self.link_picker_pick(ix, cx);
+        match self.link_picker_highlighted() {
+            Some(ix) if self.link_row_pickable(ix) => self.link_picker_pick(ix, cx),
+            // Nothing to pick: close, and let the key do what it does
+            // without a picker (a new line for Enter, an indent for Tab).
+            _ => {
+                self.close_menu(MenuSlot::Link, cx);
+                cx.propagate();
+            }
         }
     }
 
@@ -447,7 +462,7 @@ pub(crate) fn render(
         .id("link-picker-list")
         .flex()
         .flex_col()
-        .max_h(px(236.))
+        .max_h(rems(MAX_HEIGHT_REMS))
         .overflow_y_scroll()
         .track_scroll(&s.link_scroll);
     let create = s.link_picker_create_title();

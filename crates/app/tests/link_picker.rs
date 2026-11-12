@@ -404,6 +404,43 @@ fn a_blank_query_with_no_match_shows_a_message_and_stays_open(cx: &mut TestAppCo
     assert_eq!(saved_body(cx, &path), "First line\n\n\\[\\[\n");
 }
 
+#[gpui_kit::test]
+fn enter_with_nothing_to_pick_closes_it_and_starts_a_new_line(cx: &mut TestAppContext) {
+    let (f, path) = on_a_new_line(cx);
+    input(cx, &f, "[[   ");
+    assert!(has_label(cx, &f, "No matching Items"));
+    press(cx, &f, "enter");
+    assert!(!picker_open(cx, &f));
+    input(cx, &f, "x");
+    assert_eq!(saved_body(cx, &path), "First line\n\n\\[\\[   \n\nx\n");
+}
+
+#[gpui_kit::test]
+fn an_open_picker_lists_an_item_created_meanwhile(cx: &mut TestAppContext) {
+    let (f, _) = on_a_new_line(cx);
+    input(cx, &f, "[[gizm");
+    assert!(!rows(cx, &f).contains(&"Gizmo".to_string()));
+    write(
+        cx,
+        &f,
+        "notes/gizmo.md",
+        "---\ntitle: Gizmo\n---\n",
+        5,
+        note(None, "gizmo"),
+    );
+    cx.run_until_parked();
+    assert_eq!(rows(cx, &f), ["Gizmo", &create_row("gizm")]);
+}
+
+#[gpui_kit::test]
+fn tab_with_nothing_to_pick_closes_it(cx: &mut TestAppContext) {
+    let (f, _) = on_a_new_line(cx);
+    input(cx, &f, "[[   ");
+    assert!(has_label(cx, &f, "No matching Items"));
+    press(cx, &f, "tab");
+    assert!(!picker_open(cx, &f));
+}
+
 fn create_row(query: &str) -> String {
     format!("Create Note \"{query}\"")
 }
