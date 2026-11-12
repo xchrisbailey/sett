@@ -6,9 +6,8 @@ mod common;
 
 use std::fs;
 use std::path::PathBuf;
-use std::time::Duration;
 
-use common::{Fixture, open_shell};
+use common::{Fixture, body_has_label, note, open_shell, press, press_n, settle, write};
 use gpui_kit::test::{TestEventExt as _, TestQueryExt as _, TestWindowExt as _};
 use gpui_kit::{
     AppContext as _, Bounds, Context, Entity, IntoElement, MouseButton, ParentElement as _, Render,
@@ -17,24 +16,6 @@ use gpui_kit::{
 use markdown_editor::{BlockEditor, BlockEditorState};
 use sett::Selection;
 use sett_store::Change;
-
-/// Longer than the autosave delay.
-const AFTER_AUTOSAVE: Duration = Duration::from_secs(2);
-
-fn write(cx: &mut TestAppContext, f: &Fixture, rel: &str, text: &str, change: Change) {
-    let path = f.data_root.join("personal").join(rel);
-    fs::create_dir_all(path.parent().unwrap()).unwrap();
-    fs::write(path, text).unwrap();
-    let model = f.model(cx);
-    cx.update(|cx| model.update(cx, |w, cx| w.apply_change(change, cx)));
-}
-
-fn note(slug: &str) -> Change {
-    Change::Note {
-        project: None,
-        slug: slug.into(),
-    }
-}
 
 /// Opens the Note `plan` with `body`, next to a Note "Budget plan" (`budget`)
 /// and two Items sharing the slug `twin`, with the caret at the end.
@@ -45,14 +26,14 @@ fn open_plan(cx: &mut TestAppContext, body: &str) -> (Fixture, PathBuf) {
         &f,
         "notes/budget.md",
         "---\ntitle: Budget plan\n---\n",
-        note("budget"),
+        note(None, "budget"),
     );
     write(
         cx,
         &f,
         "notes/twin.md",
         "---\ntitle: Twin\n---\n",
-        note("twin"),
+        note(None, "twin"),
     );
     write(
         cx,
@@ -62,7 +43,7 @@ fn open_plan(cx: &mut TestAppContext, body: &str) -> (Fixture, PathBuf) {
         Change::Project("inbox".into()),
     );
     let plan = format!("---\ntitle: Plan\n---\n{body}");
-    write(cx, &f, "notes/plan.md", &plan, note("plan"));
+    write(cx, &f, "notes/plan.md", &plan, note(None, "plan"));
     let model = f.model(cx);
     cx.update(|cx| model.update(cx, |w, cx| w.select(Selection::Notes, cx)));
     cx.update_window(f.window, |_, window, cx| {
@@ -77,72 +58,46 @@ fn open_plan(cx: &mut TestAppContext, body: &str) -> (Fixture, PathBuf) {
     (f, path)
 }
 
-fn has_label(cx: &mut TestAppContext, f: &Fixture, label: &str) -> bool {
-    cx.update_window(f.window, |_, window, cx| {
-        window.render_frame(cx);
-        window
-            .within("note-body")
-            .try_find_by_label(label)
-            .is_some()
-    })
-    .unwrap()
-}
-
-fn press(cx: &mut TestAppContext, f: &Fixture, key: &str, times: usize) {
-    cx.update_window(f.window, |_, window, cx| {
-        for _ in 0..times {
-            window.press(key, cx);
-        }
-    })
-    .unwrap();
-    cx.run_until_parked();
-}
-
-fn settle(cx: &mut TestAppContext) {
-    cx.executor().advance_clock(AFTER_AUTOSAVE);
-    cx.run_until_parked();
-}
-
 #[gpui_kit::test]
 fn a_link_to_a_note_shows_its_title(cx: &mut TestAppContext) {
     let (f, _) = open_plan(
         cx,
         "See [[budget]] and [[budget#Quotes]] and [[budget|spend]]\n",
     );
-    assert!(has_label(cx, &f, "Budget plan"));
-    assert!(has_label(cx, &f, "Budget plan \u{203A} Quotes"));
-    assert!(has_label(cx, &f, "spend"));
+    assert!(body_has_label(cx, &f, "Budget plan"));
+    assert!(body_has_label(cx, &f, "Budget plan \u{203A} Quotes"));
+    assert!(body_has_label(cx, &f, "spend"));
 }
 
 #[gpui_kit::test]
 fn a_broken_and_an_ambiguous_link_show_their_state(cx: &mut TestAppContext) {
     let (f, _) = open_plan(cx, "See [[nowhere]] and [[twin]]\n");
-    assert!(has_label(cx, &f, "nowhere (not found)"));
-    assert!(has_label(cx, &f, "Twin (ambiguous)"));
-    assert!(!has_label(cx, &f, "Twin"));
+    assert!(body_has_label(cx, &f, "nowhere (not found)"));
+    assert!(body_has_label(cx, &f, "Twin (ambiguous)"));
+    assert!(!body_has_label(cx, &f, "Twin"));
 }
 
 #[gpui_kit::test]
 fn a_broken_link_shows_its_slug_not_its_label(cx: &mut TestAppContext) {
     let (f, _) = open_plan(cx, "See [[nowhere|spend]]\n");
-    assert!(has_label(cx, &f, "nowhere (not found)"));
-    assert!(!has_label(cx, &f, "spend (not found)"));
+    assert!(body_has_label(cx, &f, "nowhere (not found)"));
+    assert!(!body_has_label(cx, &f, "spend (not found)"));
 }
 
 #[gpui_kit::test]
 fn a_new_title_elsewhere_redraws_the_chip(cx: &mut TestAppContext) {
     let (f, _) = open_plan(cx, "See [[budget]]\n");
-    assert!(has_label(cx, &f, "Budget plan"));
+    assert!(body_has_label(cx, &f, "Budget plan"));
     write(
         cx,
         &f,
         "notes/budget.md",
         "---\ntitle: Spending\n---\n",
-        note("budget"),
+        note(None, "budget"),
     );
     cx.run_until_parked();
-    assert!(has_label(cx, &f, "Spending"));
-    assert!(!has_label(cx, &f, "Budget plan"));
+    assert!(body_has_label(cx, &f, "Spending"));
+    assert!(!body_has_label(cx, &f, "Budget plan"));
 }
 
 #[gpui_kit::test]
@@ -152,31 +107,31 @@ fn the_caret_inside_a_link_opens_it_without_changing_the_file(cx: &mut TestAppCo
     settle(cx);
     let before = fs::read_to_string(&path).unwrap();
     let modified = fs::metadata(&path).unwrap().modified().unwrap();
-    assert!(has_label(cx, &f, "Budget plan"));
+    assert!(body_has_label(cx, &f, "Budget plan"));
 
     // The caret is after "end"; four steps left sit just after `]]`.
-    press(cx, &f, "left", 4);
-    assert!(has_label(cx, &f, "Budget plan"));
+    press_n(cx, &f, "left", 4);
+    assert!(body_has_label(cx, &f, "Budget plan"));
     // One more step is inside the Link: the chip gives way to source.
-    press(cx, &f, "left", 1);
-    assert!(!has_label(cx, &f, "Budget plan"));
+    press(cx, &f, "left");
+    assert!(!body_has_label(cx, &f, "Budget plan"));
     // Stepping out the other side closes it again.
-    press(cx, &f, "right", 1);
-    assert!(has_label(cx, &f, "Budget plan"));
-    press(cx, &f, "left", 9);
-    assert!(!has_label(cx, &f, "Budget plan"));
-    press(cx, &f, "left", 1);
-    assert!(has_label(cx, &f, "Budget plan"));
+    press(cx, &f, "right");
+    assert!(body_has_label(cx, &f, "Budget plan"));
+    press_n(cx, &f, "left", 9);
+    assert!(!body_has_label(cx, &f, "Budget plan"));
+    press(cx, &f, "left");
+    assert!(body_has_label(cx, &f, "Budget plan"));
 
     settle(cx);
     assert_eq!(fs::read_to_string(&path).unwrap(), before);
     assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), modified);
 
     // The moves left no undo step: the first undo removes what is typed next.
-    press(cx, &f, "secondary-down", 1);
+    press(cx, &f, "secondary-down");
     cx.update_window(f.window, |_, window, cx| window.input("!", cx))
         .unwrap();
-    press(cx, &f, "secondary-z", 1);
+    press(cx, &f, "secondary-z");
     settle(cx);
     assert_eq!(fs::read_to_string(&path).unwrap(), before);
 }
@@ -185,7 +140,7 @@ fn the_caret_inside_a_link_opens_it_without_changing_the_file(cx: &mut TestAppCo
 fn typing_inside_a_link_edits_its_source(cx: &mut TestAppContext) {
     let (f, path) = open_plan(cx, "See [[budget]]\n");
     // Left of `]]`, inside the Link.
-    press(cx, &f, "left", 2);
+    press_n(cx, &f, "left", 2);
     cx.update_window(f.window, |_, window, cx| window.input("x", cx))
         .unwrap();
     settle(cx);
@@ -195,8 +150,8 @@ fn typing_inside_a_link_edits_its_source(cx: &mut TestAppContext) {
             .ends_with("See [[budgetx]]\n")
     );
     // `budgetx` has no Item.
-    press(cx, &f, "right", 2);
-    assert!(has_label(cx, &f, "budgetx (not found)"));
+    press_n(cx, &f, "right", 2);
+    assert!(body_has_label(cx, &f, "budgetx (not found)"));
 }
 
 /// A bare editor in a window, outside the app, so a test can read its model.
@@ -324,9 +279,9 @@ fn saved(cx: &mut TestAppContext, path: &PathBuf) -> String {
 fn backspace_after_a_chip_removes_the_whole_link_and_one_undo_restores_it(cx: &mut TestAppContext) {
     let (f, path) = open_plan(cx, "See [[budget]]\n");
     let before = saved(cx, &path);
-    press(cx, &f, "backspace", 1);
+    press(cx, &f, "backspace");
     assert_eq!(saved(cx, &path), "---\ntitle: Plan\n---\nSee \n");
-    press(cx, &f, "secondary-z", 1);
+    press(cx, &f, "secondary-z");
     assert_eq!(saved(cx, &path), before);
 }
 
@@ -335,28 +290,28 @@ fn delete_before_a_chip_removes_the_whole_link_and_one_undo_restores_it(cx: &mut
     let (f, path) = open_plan(cx, "See [[budget]]\n");
     let before = saved(cx, &path);
     // Ten steps left: just before `[[`, outside the chip.
-    press(cx, &f, "left", 10);
-    press(cx, &f, "delete", 1);
+    press_n(cx, &f, "left", 10);
+    press(cx, &f, "delete");
     assert_eq!(saved(cx, &path), "---\ntitle: Plan\n---\nSee \n");
-    press(cx, &f, "secondary-z", 1);
+    press(cx, &f, "secondary-z");
     assert_eq!(saved(cx, &path), before);
 }
 
 #[gpui_kit::test]
 fn backspace_inside_an_open_chip_removes_one_character(cx: &mut TestAppContext) {
     let (f, path) = open_plan(cx, "See [[budget]]\n");
-    press(cx, &f, "left", 2);
-    press(cx, &f, "backspace", 1);
+    press_n(cx, &f, "left", 2);
+    press(cx, &f, "backspace");
     assert!(saved(cx, &path).ends_with("See [[budge]]\n"));
 }
 
 #[gpui_kit::test]
 fn copying_across_a_chip_and_pasting_keeps_the_link_text(cx: &mut TestAppContext) {
     let (f, path) = open_plan(cx, "See [[budget]] end\n");
-    press(cx, &f, "shift-left", 14);
-    press(cx, &f, "secondary-c", 1);
-    press(cx, &f, "secondary-down", 1);
-    press(cx, &f, "secondary-v", 1);
+    press_n(cx, &f, "shift-left", 14);
+    press(cx, &f, "secondary-c");
+    press(cx, &f, "secondary-down");
+    press(cx, &f, "secondary-v");
     assert!(saved(cx, &path).ends_with("See [[budget]] end[[budget]] end\n"));
 }
 
@@ -372,7 +327,7 @@ fn typing_a_link_by_hand_ends_with_a_closed_chip(cx: &mut TestAppContext) {
     cx.run_until_parked();
     let text = saved(cx, &path);
     assert!(text.ends_with("See [[budget]]\n"), "{text:?}");
-    assert!(has_label(cx, &f, "Budget plan"));
+    assert!(body_has_label(cx, &f, "Budget plan"));
 }
 
 #[gpui_kit::test]

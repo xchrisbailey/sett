@@ -4,9 +4,8 @@
 mod common;
 
 use std::fs;
-use std::time::Duration;
 
-use common::{Fixture, center_title, open_shell};
+use common::{Fixture, center_title, input, note, open_shell, press, settle, write};
 use gpui_kit::test::{TestEventExt as _, TestWindowExt as _};
 use gpui_kit::{
     AppContext as _, InputEvent as _, Modifiers, ModifiersChangedEvent, MouseButton,
@@ -14,21 +13,6 @@ use gpui_kit::{
 };
 use sett::Selection;
 use sett_store::{Change, Date};
-
-fn write(cx: &mut TestAppContext, f: &Fixture, rel: &str, text: &str, change: Change) {
-    let path = f.data_root.join("personal").join(rel);
-    fs::create_dir_all(path.parent().unwrap()).unwrap();
-    fs::write(path, text).unwrap();
-    let model = f.model(cx);
-    cx.update(|cx| model.update(cx, |w, cx| w.apply_change(change, cx)));
-}
-
-fn note(slug: &str) -> Change {
-    Change::Note {
-        project: None,
-        slug: slug.into(),
-    }
-}
 
 /// Opens the Note `plan` with `body`, next to a Note "Budget plan" with
 /// headings, a Task "Fix bug" and a Journal Entry.
@@ -39,7 +23,7 @@ fn open_plan(cx: &mut TestAppContext, body: &str) -> Fixture {
         &f,
         "notes/budget.md",
         "---\ntitle: Budget plan\n---\nIntro\n\n# Overview\n\ntext\n\n## Quotes\n\nmore\n",
-        note("budget"),
+        note(None, "budget"),
     );
     write(
         cx,
@@ -60,7 +44,7 @@ fn open_plan(cx: &mut TestAppContext, body: &str) -> Fixture {
         &f,
         "notes/plan.md",
         &format!("---\ntitle: Plan\n---\n{body}"),
-        note("plan"),
+        note(None, "plan"),
     );
     let model = f.model(cx);
     cx.update(|cx| model.update(cx, |w, cx| w.select(Selection::Notes, cx)));
@@ -111,17 +95,6 @@ fn click_chip(cx: &mut TestAppContext, f: &Fixture, label: &str, cmd: bool) {
         window.render_frame(cx);
     })
     .unwrap();
-    cx.run_until_parked();
-}
-
-fn type_text(cx: &mut TestAppContext, f: &Fixture, text: &str) {
-    cx.update_window(f.window, |_, window, cx| window.input(text, cx))
-        .unwrap();
-    cx.run_until_parked();
-}
-
-fn settle(cx: &mut TestAppContext) {
-    cx.executor().advance_clock(Duration::from_secs(2));
     cx.run_until_parked();
 }
 
@@ -181,7 +154,7 @@ fn a_heading_link_opens_with_the_caret_in_that_heading(cx: &mut TestAppContext) 
     let f = open_plan(cx, "See [[budget#quotes|jump]]\n");
     click_chip(cx, &f, "jump", true);
     assert_eq!(title(cx, &f), "Budget plan");
-    type_text(cx, &f, "X");
+    input(cx, &f, "X");
     settle(cx);
     let text = fs::read_to_string(f.data_root.join("personal/notes/budget.md")).unwrap();
     assert!(text.contains("## XQuotes\n"), "{text}");
@@ -238,7 +211,7 @@ fn pending_edits_in_the_item_you_leave_are_saved(cx: &mut TestAppContext) {
         window.press("secondary-down", cx);
     })
     .unwrap();
-    type_text(cx, &f, "Z");
+    input(cx, &f, "Z");
     // No autosave yet: the click itself must write it.
     click_chip(cx, &f, "Budget plan", true);
     let text = fs::read_to_string(f.data_root.join("personal/notes/plan.md")).unwrap();
@@ -250,7 +223,7 @@ fn a_self_link_with_a_heading_reveals_it_without_reopening(cx: &mut TestAppConte
     let f = open_plan(cx, "# Top\n\ntext\n\n## Later\n\nSee [[plan#later|here]]\n");
     click_chip(cx, &f, "here", true);
     assert_eq!(title(cx, &f), "Plan");
-    type_text(cx, &f, "X");
+    input(cx, &f, "X");
     settle(cx);
     let text = fs::read_to_string(f.data_root.join("personal/notes/plan.md")).unwrap();
     assert!(text.contains("## XLater\n"), "{text}");
@@ -263,23 +236,14 @@ fn a_self_link_without_a_heading_does_nothing(cx: &mut TestAppContext) {
     assert_eq!(title(cx, &f), "Plan");
 }
 
-fn press_key(cx: &mut TestAppContext, f: &Fixture, keys: &str) {
-    cx.update_window(f.window, |_, window, cx| {
-        window.press(keys, cx);
-        window.render_frame(cx);
-    })
-    .unwrap();
-    cx.run_until_parked();
-}
-
 #[gpui_kit::test]
 fn the_keyboard_follows_the_link_the_caret_touches(cx: &mut TestAppContext) {
     let f = open_plan(cx, "See [[budget]]\n");
     cx.update_window(f.window, |_, window, cx| window.click("note-body", cx))
         .unwrap();
     // The caret goes to the end of the document, right after the chip.
-    press_key(cx, &f, "secondary-down");
-    press_key(cx, &f, "secondary-alt-enter");
+    press(cx, &f, "secondary-down");
+    press(cx, &f, "secondary-alt-enter");
     assert_eq!(title(cx, &f), "Budget plan");
 }
 
@@ -288,10 +252,10 @@ fn the_keyboard_route_follows_a_heading_link(cx: &mut TestAppContext) {
     let f = open_plan(cx, "See [[budget#quotes|jump]]\n");
     cx.update_window(f.window, |_, window, cx| window.click("note-body", cx))
         .unwrap();
-    press_key(cx, &f, "secondary-down");
-    press_key(cx, &f, "secondary-alt-enter");
+    press(cx, &f, "secondary-down");
+    press(cx, &f, "secondary-alt-enter");
     assert_eq!(title(cx, &f), "Budget plan");
-    type_text(cx, &f, "X");
+    input(cx, &f, "X");
     settle(cx);
     let text = fs::read_to_string(f.data_root.join("personal/notes/budget.md")).unwrap();
     assert!(text.contains("## XQuotes\n"), "{text}");
@@ -302,7 +266,7 @@ fn the_keyboard_route_does_nothing_away_from_a_link(cx: &mut TestAppContext) {
     let f = open_plan(cx, "See [[budget]] and more\n");
     cx.update_window(f.window, |_, window, cx| window.click("note-body", cx))
         .unwrap();
-    press_key(cx, &f, "secondary-down");
-    press_key(cx, &f, "secondary-alt-enter");
+    press(cx, &f, "secondary-down");
+    press(cx, &f, "secondary-alt-enter");
     assert_eq!(title(cx, &f), "Plan");
 }

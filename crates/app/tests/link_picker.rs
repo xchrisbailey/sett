@@ -6,46 +6,21 @@ mod common;
 
 use std::fs;
 use std::path::PathBuf;
-use std::time::{Duration, SystemTime};
 
-use common::{Fixture, click_label, open_shell};
-use gpui_kit::test::{TestQueryExt as _, TestWindowExt as _};
+use common::{Fixture, click_label, has_label, input, note, open_shell, press, settle, write_aged};
+use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{AppContext as _, Role, TestAppContext};
 use sett::Selection;
 use sett_store::{Change, ItemId};
 
 /// Longer than the autosave delay.
-const AFTER_AUTOSAVE: Duration = Duration::from_secs(2);
-
-/// Writes a file in the personal Space, `age` seconds old, and tells the app.
-fn write(cx: &mut TestAppContext, f: &Fixture, rel: &str, text: &str, age: u64, change: Change) {
-    let path = f.data_root.join("personal").join(rel);
-    fs::create_dir_all(path.parent().unwrap()).unwrap();
-    fs::write(&path, text).unwrap();
-    let when = SystemTime::now() - Duration::from_secs(age);
-    fs::File::options()
-        .write(true)
-        .open(&path)
-        .unwrap()
-        .set_modified(when)
-        .unwrap();
-    let model = f.model(cx);
-    cx.update(|cx| model.update(cx, |w, cx| w.apply_change(change, cx)));
-}
-
-fn note(project: Option<&str>, slug: &str) -> Change {
-    Change::Note {
-        project: project.map(str::to_string),
-        slug: slug.to_string(),
-    }
-}
 
 /// A Space with a few Items, then the Note "Plan" open with the caret on a
 /// new empty line under its first line.
 fn on_a_new_line(cx: &mut TestAppContext) -> (Fixture, PathBuf) {
     let f = open_shell(cx);
     let plan = "---\ntitle: Plan\n---\nFirst line\n";
-    write(cx, &f, "notes/plan.md", plan, 900, note(None, "plan"));
+    write_aged(cx, &f, "notes/plan.md", plan, 900, note(None, "plan"));
     let notes = [
         ("quotes", "Quotes", 500),
         ("quick-start", "Quick start", 100),
@@ -54,7 +29,7 @@ fn on_a_new_line(cx: &mut TestAppContext) -> (Fixture, PathBuf) {
     ];
     for (slug, title, age) in notes {
         let text = format!("---\ntitle: {title}\n---\nBody\n");
-        write(
+        write_aged(
             cx,
             &f,
             &format!("notes/{slug}.md"),
@@ -64,7 +39,7 @@ fn on_a_new_line(cx: &mut TestAppContext) -> (Fixture, PathBuf) {
         );
     }
     // A Project with a Task, and an archived Project whose Items are left out.
-    write(
+    write_aged(
         cx,
         &f,
         "projects/kitchen-reno/project.md",
@@ -72,7 +47,7 @@ fn on_a_new_line(cx: &mut TestAppContext) -> (Fixture, PathBuf) {
         10,
         Change::Project("kitchen-reno".into()),
     );
-    write(
+    write_aged(
         cx,
         &f,
         "projects/kitchen-reno/tasks/measure.md",
@@ -83,7 +58,7 @@ fn on_a_new_line(cx: &mut TestAppContext) -> (Fixture, PathBuf) {
             slug: "measure".into(),
         },
     );
-    write(
+    write_aged(
         cx,
         &f,
         "projects/old/project.md",
@@ -91,7 +66,7 @@ fn on_a_new_line(cx: &mut TestAppContext) -> (Fixture, PathBuf) {
         10,
         Change::Project("old".into()),
     );
-    write(
+    write_aged(
         cx,
         &f,
         "projects/old/tasks/ancient.md",
@@ -103,7 +78,7 @@ fn on_a_new_line(cx: &mut TestAppContext) -> (Fixture, PathBuf) {
         },
     );
     // Two Items share the slug "shared"; the Space-level Note wins.
-    write(
+    write_aged(
         cx,
         &f,
         "notes/shared.md",
@@ -111,7 +86,7 @@ fn on_a_new_line(cx: &mut TestAppContext) -> (Fixture, PathBuf) {
         30,
         note(None, "shared"),
     );
-    write(
+    write_aged(
         cx,
         &f,
         "projects/kitchen-reno/notes/shared.md",
@@ -135,34 +110,6 @@ fn on_a_new_line(cx: &mut TestAppContext) -> (Fixture, PathBuf) {
     (f, path)
 }
 
-fn input(cx: &mut TestAppContext, f: &Fixture, text: &str) {
-    cx.update_window(f.window, |_, window, cx| {
-        window.render_frame(cx);
-        window.input(text, cx);
-    })
-    .unwrap();
-    cx.run_until_parked();
-}
-
-fn press(cx: &mut TestAppContext, f: &Fixture, keys: &str) {
-    cx.update_window(f.window, |_, window, cx| {
-        window.render_frame(cx);
-        for key in keys.split_whitespace() {
-            window.press(key, cx);
-        }
-    })
-    .unwrap();
-    cx.run_until_parked();
-}
-
-fn has_label(cx: &mut TestAppContext, f: &Fixture, label: &str) -> bool {
-    cx.update_window(f.window, |_, window, cx| {
-        window.render_frame(cx);
-        window.try_find_by_label(label).is_some()
-    })
-    .unwrap()
-}
-
 fn picker_open(cx: &mut TestAppContext, f: &Fixture) -> bool {
     has_label(cx, f, "Link Picker")
 }
@@ -182,8 +129,7 @@ fn rows(cx: &mut TestAppContext, f: &Fixture) -> Vec<String> {
 }
 
 fn saved_body(cx: &mut TestAppContext, path: &PathBuf) -> String {
-    cx.executor().advance_clock(AFTER_AUTOSAVE);
-    cx.run_until_parked();
+    settle(cx);
     let text = fs::read_to_string(path).unwrap();
     text.split_once("---\n")
         .and_then(|(_, rest)| rest.split_once("---\n"))
@@ -420,7 +366,7 @@ fn an_open_picker_lists_an_item_created_meanwhile(cx: &mut TestAppContext) {
     let (f, _) = on_a_new_line(cx);
     input(cx, &f, "[[gizm");
     assert!(!rows(cx, &f).contains(&"Gizmo".to_string()));
-    write(
+    write_aged(
         cx,
         &f,
         "notes/gizmo.md",
@@ -548,7 +494,7 @@ fn creating_from_a_task_makes_a_note_in_its_project(cx: &mut TestAppContext) {
 fn creating_from_a_journal_entry_makes_a_space_level_note(cx: &mut TestAppContext) {
     let (f, _) = on_a_new_line(cx);
     let date = sett_store::Date::parse("2026-11-02").unwrap();
-    write(
+    write_aged(
         cx,
         &f,
         "journal/2026-11-02.md",
@@ -579,8 +525,7 @@ fn the_current_item_stays_open_and_the_chip_row_lists_the_new_note(cx: &mut Test
     let (f, _) = on_a_new_line(cx);
     input(cx, &f, "[[Paint colours");
     press(cx, &f, "enter");
-    cx.executor().advance_clock(AFTER_AUTOSAVE);
-    cx.run_until_parked();
+    settle(cx);
     cx.update_window(f.window, |_, window, cx| {
         window.render_frame(cx);
         assert_eq!(window.find("note-title").value(), Some("Plan"));
