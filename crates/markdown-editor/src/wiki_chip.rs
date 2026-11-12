@@ -42,6 +42,16 @@ pub(crate) fn link_parts(inner: &str) -> LinkParts<'_> {
     }
 }
 
+/// The text between the `[[` and `]]` of a Link's source.
+pub(crate) fn link_inner(source: &str) -> Option<&str> {
+    source.strip_prefix("[[")?.strip_suffix("]]")
+}
+
+/// The parts of a Link's source, `[[slug|label]]` and so on.
+pub(crate) fn source_parts(source: &str) -> Option<LinkParts<'_>> {
+    link_inner(source).map(link_parts)
+}
+
 /// The Link spans of `inline` that show as chips: the ones the serializer
 /// writes bare, in runs without the `code` or link mark. A span split across
 /// mark runs is not one, because the serializer sees one run at a time.
@@ -77,10 +87,7 @@ pub(crate) const CHIP_NODE: &str = "sett-wiki-chip";
 /// The chip object for the Link `source` (`[[slug]]`). Its fallback text and
 /// accessibility label are the source.
 pub(crate) fn chip_node(source: &str, key: ChipKey) -> InlineNode {
-    let inner = source
-        .strip_prefix("[[")
-        .and_then(|s| s.strip_suffix("]]"))
-        .unwrap_or(source);
+    let inner = link_inner(source).unwrap_or(source);
     InlineNode::custom(
         MarkdownNode::new(
             CHIP_NODE,

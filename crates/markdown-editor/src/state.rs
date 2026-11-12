@@ -89,7 +89,8 @@ actions!(
         CalloutMenuDown,
         CalloutMenuPick,
         CalloutMenuClose,
-        // FORK: the Link Picker.
+        // FORK: following a Link from the keyboard, and the Link Picker.
+        FollowWikiLink,
         LinkPickerUp,
         LinkPickerDown,
         LinkPickerPick,
@@ -232,6 +233,9 @@ pub(crate) fn init(cx: &mut App) {
         // FORK: the Callout type menu, for the callout holding the caret;
         // elsewhere the keystroke propagates.
         KeyBinding::new(platform_key!("cmd", "alt-c"), OpenCalloutMenu, ctx),
+        // FORK: follow the Link the caret is in or touches; elsewhere the
+        // keystroke propagates. Cmd/Ctrl-Enter is taken by `ExitBlock`.
+        KeyBinding::new(platform_key!("cmd", "alt-enter"), FollowWikiLink, ctx),
         KeyBinding::new("shift-enter", SoftBreak, ctx),
         KeyBinding::new(platform_key!("cmd", "enter"), ExitBlock, ctx),
         KeyBinding::new(platform_key!("cmd", "c"), Copy, ctx),
@@ -737,11 +741,9 @@ impl BlockEditorState {
             .flat_map(|inline| {
                 super::wiki_chip::chip_spans(inline)
                     .into_iter()
-                    .map(|span| {
-                        let source = &inline.text()[span];
-                        super::wiki_chip::link_parts(&source[2..source.len() - 2])
-                            .slug
-                            .to_string()
+                    .filter_map(|span| {
+                        super::wiki_chip::source_parts(&inline.text()[span])
+                            .map(|parts| parts.slug.to_string())
                     })
                     .collect::<Vec<_>>()
             })
@@ -1760,15 +1762,56 @@ impl BlockEditorState {
             }
             (pos.block, leaf.chip_at(at)?)
         };
+        self.wiki_chip_hit(block, span)
+    }
+
+    /// FORK: the Link at `span` of `block`, as a hit.
+    fn wiki_chip_hit(
+        &self,
+        block: BlockId,
+        span: std::ops::Range<usize>,
+    ) -> Option<super::wiki_chip::WikiChipHit> {
         let source = self.model.doc.inline(block)?.text().get(span.clone())?;
-        let inner = source.strip_prefix("[[")?.strip_suffix("]]")?;
-        let parts = super::wiki_chip::link_parts(inner);
+        let parts = super::wiki_chip::source_parts(source)?;
         Some(super::wiki_chip::WikiChipHit {
             block,
             span,
             slug: parts.slug.to_string(),
             heading: parts.heading.map(|h| h.to_string().into()),
         })
+    }
+
+    /// FORK: the Link whose span holds the caret or has it at an edge.
+    fn wiki_chip_at_caret(&self) -> Option<super::wiki_chip::WikiChipHit> {
+        let BlockSelection::Text { anchor, head } = self.model.selection() else {
+            return None;
+        };
+        if anchor != head {
+            return None;
+        }
+        let inline = self.model.doc.inline(head.block)?;
+        let span = super::wiki_chip::chip_spans(inline)
+            .into_iter()
+            .find(|span| span.start <= head.offset && head.offset <= span.end)?;
+        self.wiki_chip_hit(head.block, span)
+    }
+
+    /// FORK: the keyboard route to following a Link: emit
+    /// [`BlockEditorEvent::WikiLinkClicked`] for the one the caret is in or
+    /// touches. Elsewhere the key passes on.
+    pub(crate) fn on_follow_wiki_link(
+        &mut self,
+        _: &FollowWikiLink,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match self.wiki_chip_at_caret() {
+            Some(chip) => cx.emit(BlockEditorEvent::WikiLinkClicked {
+                slug: chip.slug.into(),
+                heading: chip.heading,
+            }),
+            None => cx.propagate(),
+        }
     }
 
     /// FORK: Cmd/Ctrl+click: emit [`BlockEditorEvent::WikiLinkClicked`] for

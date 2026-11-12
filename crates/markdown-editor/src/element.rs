@@ -439,6 +439,7 @@ impl RenderOnce for BlockEditor {
             .on_action(window.listener_for(s, BlockEditorState::on_callout_menu_down))
             .on_action(window.listener_for(s, BlockEditorState::on_callout_menu_pick))
             .on_action(window.listener_for(s, BlockEditorState::on_callout_menu_close))
+            .on_action(window.listener_for(s, BlockEditorState::on_follow_wiki_link))
             .on_action(window.listener_for(s, BlockEditorState::on_link_picker_up))
             .on_action(window.listener_for(s, BlockEditorState::on_link_picker_down))
             .on_action(window.listener_for(s, BlockEditorState::on_link_picker_pick))

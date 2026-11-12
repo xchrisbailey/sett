@@ -262,3 +262,47 @@ fn a_self_link_without_a_heading_does_nothing(cx: &mut TestAppContext) {
     click_chip(cx, &f, "Plan", true);
     assert_eq!(title(cx, &f), "Plan");
 }
+
+fn press_key(cx: &mut TestAppContext, f: &Fixture, keys: &str) {
+    cx.update_window(f.window, |_, window, cx| {
+        window.press(keys, cx);
+        window.render_frame(cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+}
+
+#[gpui_kit::test]
+fn the_keyboard_follows_the_link_the_caret_touches(cx: &mut TestAppContext) {
+    let f = open_plan(cx, "See [[budget]]\n");
+    cx.update_window(f.window, |_, window, cx| window.click("note-body", cx))
+        .unwrap();
+    // The caret goes to the end of the document, right after the chip.
+    press_key(cx, &f, "secondary-down");
+    press_key(cx, &f, "secondary-alt-enter");
+    assert_eq!(title(cx, &f), "Budget plan");
+}
+
+#[gpui_kit::test]
+fn the_keyboard_route_follows_a_heading_link(cx: &mut TestAppContext) {
+    let f = open_plan(cx, "See [[budget#quotes|jump]]\n");
+    cx.update_window(f.window, |_, window, cx| window.click("note-body", cx))
+        .unwrap();
+    press_key(cx, &f, "secondary-down");
+    press_key(cx, &f, "secondary-alt-enter");
+    assert_eq!(title(cx, &f), "Budget plan");
+    type_text(cx, &f, "X");
+    settle(cx);
+    let text = fs::read_to_string(f.data_root.join("personal/notes/budget.md")).unwrap();
+    assert!(text.contains("## XQuotes\n"), "{text}");
+}
+
+#[gpui_kit::test]
+fn the_keyboard_route_does_nothing_away_from_a_link(cx: &mut TestAppContext) {
+    let f = open_plan(cx, "See [[budget]] and more\n");
+    cx.update_window(f.window, |_, window, cx| window.click("note-body", cx))
+        .unwrap();
+    press_key(cx, &f, "secondary-down");
+    press_key(cx, &f, "secondary-alt-enter");
+    assert_eq!(title(cx, &f), "Plan");
+}
