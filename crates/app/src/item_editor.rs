@@ -11,9 +11,7 @@ use gpui_kit::{
     StatefulInteractiveElement as _, Styled as _, Subscription, Task, TestSupportExt as _, Window,
     div, prelude::FluentBuilder as _,
 };
-use markdown_editor::{
-    BlockEditor, BlockEditorEvent, BlockEditorState, WikiLinkDirectory, WikiLinkInfo, WikiLinkState,
-};
+use markdown_editor::{BlockEditor, BlockEditorEvent, BlockEditorState};
 use sett_store::{Date, EditorMode, JournalEntry, LinkTarget, Note, Space};
 
 use crate::app_model::AppModel;
@@ -158,7 +156,7 @@ impl ItemEditor {
                     BlockEditorEvent::Changed { .. } => {
                         this.body = block.read(cx).source();
                         // A Link may have been typed or deleted.
-                        this.refresh_links(cx);
+                        this.refresh_link_data(cx);
                         this.edited(window, cx);
                     }
                     BlockEditorEvent::WikiLinkClicked { slug, heading } => {
@@ -260,9 +258,6 @@ impl ItemEditor {
             }
             return;
         }
-        // The views save what they hide, but write it now so the file is
-        // current whichever view takes over.
-        self.flush(window, cx);
         let heading = heading.map(str::to_string);
         self.model
             .update(cx, |model, cx| model.open_item_at(item, heading, cx));
@@ -383,7 +378,6 @@ impl ItemEditor {
         let Some(item) = self.item.clone() else {
             return;
         };
-        self.refresh_link_candidates(cx);
         let model = self.model.read(cx);
         if model.space() != item.space() {
             self.flush(window, cx);
@@ -392,7 +386,7 @@ impl ItemEditor {
         }
         let mode = model.editor_mode();
         // Another Item may have been renamed, added or removed.
-        self.refresh_links(cx);
+        self.refresh_link_data(cx);
         if mode != self.mode {
             self.set_mode(mode, window, cx);
         }
@@ -477,7 +471,6 @@ impl ItemEditor {
         self.block
             .update(cx, |block, cx| block.set_readonly(locked, cx));
         self.load_body(window, cx);
-        self.refresh_link_candidates(cx);
         self.seen = seen;
         self.base = Some(base);
         self.dirty = false;
@@ -507,9 +500,8 @@ impl ItemEditor {
         match created {
             Ok(slug) => {
                 block.update(cx, |block, cx| block.complete_link_pick(&slug, cx));
-                self.refresh_link_candidates(cx);
                 // The new Note's chip shows its title straight away.
-                self.refresh_links(cx);
+                self.refresh_link_data(cx);
             }
             Err(err) => window.push_notification(
                 Notification::error(format!("Couldn\u{2019}t create the Note. {err}.")),
@@ -518,15 +510,21 @@ impl ItemEditor {
         }
     }
 
-    /// Gives the Link Picker the Space's Items, minus the open one.
-    fn refresh_link_candidates(&self, cx: &mut Context<Self>) {
-        let Some(item) = &self.item else {
+    /// Tells the block editor what its Links point at (so chips show titles
+    /// and states) and which Items the Link Picker offers. The editor
+    /// repaints only when the answer differs from the last one.
+    fn refresh_link_data(&self, cx: &mut Context<Self>) {
+        let Some(item) = self.item.as_ref().map(ItemRef::id) else {
             return;
         };
-        let candidates =
-            crate::link_candidates::link_candidates(self.model.read(cx).index(), &item.id());
-        self.block
-            .update(cx, |block, _| block.set_link_candidates(candidates));
+        let model = self.model.clone();
+        self.block.update(cx, |block, cx| {
+            let index = model.read(cx).index();
+            let directory = crate::link_data::wiki_link_directory(index, block.wiki_link_slugs());
+            let candidates = crate::link_data::link_candidates(index, &item);
+            block.set_wiki_links(Arc::new(directory), cx);
+            block.set_link_candidates(candidates, cx);
+        });
     }
 
     fn set_mode(&mut self, mode: EditorMode, window: &mut Window, cx: &mut Context<Self>) {
@@ -548,36 +546,6 @@ impl ItemEditor {
 
     /// Puts the body into the editor for the current mode. Neither editor
     /// reports this as an edit.
-    /// Tells the block editor what each Link in the body points at, so its
-    /// chips show titles and states. The editor repaints only when the answer
-    /// differs from the last one.
-    fn refresh_links(&self, cx: &mut Context<Self>) {
-        let model = self.model.clone();
-        self.block.update(cx, |block, cx| {
-            let model = model.read(cx);
-            let index = model.index();
-            let mut directory = WikiLinkDirectory::new();
-            for slug in block.wiki_link_slugs() {
-                if let LinkTarget::Found { item, ambiguous } = index.resolve(&slug) {
-                    let title = index.title(&item).unwrap_or_else(|| item.slug());
-                    let state = if ambiguous {
-                        WikiLinkState::Ambiguous
-                    } else {
-                        WikiLinkState::Working
-                    };
-                    directory.insert(
-                        slug,
-                        WikiLinkInfo {
-                            title: title.into(),
-                            state,
-                        },
-                    );
-                }
-            }
-            block.set_wiki_links(Arc::new(directory), cx);
-        });
-    }
-
     fn load_body(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let body = self.body.clone();
         match self.mode {
@@ -588,7 +556,7 @@ impl ItemEditor {
                 if let Err(err) = result {
                     eprintln!("sett: couldn't show the block view: {err}");
                 }
-                self.refresh_links(cx);
+                self.refresh_link_data(cx);
             }
             EditorMode::Raw => self
                 .raw

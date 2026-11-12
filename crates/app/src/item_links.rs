@@ -95,7 +95,7 @@ pub(crate) fn kind_label(index: &SpaceIndex, item: &ItemId) -> String {
 fn item_row(index: &SpaceIndex, item: ItemId, ambiguous: bool) -> Row {
     let kind = kind_label(index, &item);
     Row::Item {
-        title: index.title(&item).unwrap_or_else(|| item.slug()).into(),
+        title: index.title_or_slug(&item).into(),
         kind: kind.into(),
         item,
         ambiguous,
