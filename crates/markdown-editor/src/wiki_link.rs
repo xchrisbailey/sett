@@ -12,9 +12,10 @@ use std::{
 
 use ::markdown::mdast::Node;
 use gpui::{
-    AnyElement, App, IntoElement as _, ParentElement as _, SharedString, Styled as _, Window, div,
-    rems,
+    AnyElement, App, InteractiveElement as _, IntoElement as _, ParentElement as _, Role,
+    SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, rems,
 };
+use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::base::text::{
     InlineElement, InlineRenderContext, MarkdownNode, MarkdownParseContext, MarkdownPlugin,
 };
@@ -101,7 +102,27 @@ const MAX_WIDTH_REMS: f32 = 20.;
 
 fn chip(parts: &LinkParts<'_>, info: Option<&WikiLinkInfo>, cx: &App) -> AnyElement {
     let theme = cx.theme();
+    let working = info.filter(|info| info.state != WikiLinkState::Broken);
+    let shown = match (working, parts.label, parts.heading) {
+        (None, label, _) => label.unwrap_or(parts.slug).to_string(),
+        (Some(_), Some(label), _) => label.to_string(),
+        (Some(info), None, Some(heading)) => format!("{} \u{203A} {heading}", info.title),
+        (Some(info), None, None) => info.title.to_string(),
+    };
+    let name = match working {
+        None => format!("{shown} (not found)"),
+        Some(info) if info.state == WikiLinkState::Ambiguous => format!("{shown} (ambiguous)"),
+        Some(_) => shown,
+    };
     let base = h_flex()
+        .id(("wiki-chip", {
+            let mut hasher = std::hash::DefaultHasher::new();
+            std::hash::Hash::hash(parts.slug, &mut hasher);
+            std::hash::Hasher::finish(&hasher) as usize
+        }))
+        .role(Role::Link)
+        .aria_label(name)
+        .test_support()
         .items_center()
         .gap_1()
         .px_1()
@@ -116,7 +137,7 @@ fn chip(parts: &LinkParts<'_>, info: Option<&WikiLinkInfo>, cx: &App) -> AnyElem
             .text_ellipsis()
             .child(text)
     };
-    let Some(info) = info.filter(|info| info.state != WikiLinkState::Broken) else {
+    let Some(info) = working else {
         // A broken Link keeps its slug (or label) in a dashed outline.
         let text = parts.label.unwrap_or(parts.slug).to_string();
         return base

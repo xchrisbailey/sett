@@ -1,4 +1,5 @@
 use std::io;
+use std::sync::Arc;
 use std::time::Duration;
 
 use gpui_kit::component::input::{Editor, EditorState, Input, InputEvent, InputState};
@@ -10,8 +11,10 @@ use gpui_kit::{
     StatefulInteractiveElement as _, Styled as _, Subscription, Task, TestSupportExt as _, Window,
     div, prelude::FluentBuilder as _,
 };
-use markdown_editor::{BlockEditor, BlockEditorEvent, BlockEditorState};
-use sett_store::{Date, EditorMode, JournalEntry, Note, Space};
+use markdown_editor::{
+    BlockEditor, BlockEditorEvent, BlockEditorState, WikiLinkDirectory, WikiLinkInfo, WikiLinkState,
+};
+use sett_store::{Date, EditorMode, JournalEntry, LinkTarget, Note, Space};
 
 use crate::app_model::AppModel;
 use crate::dates::to_chrono;
@@ -151,6 +154,8 @@ impl ItemEditor {
             cx.subscribe_in(&block, window, |this, block, event, window, cx| {
                 if let BlockEditorEvent::Changed { .. } = event {
                     this.body = block.read(cx).source();
+                    // A Link may have been typed or deleted.
+                    this.refresh_links(cx);
                     this.edited(window, cx);
                 }
             }),
@@ -322,6 +327,8 @@ impl ItemEditor {
             return;
         }
         let mode = model.editor_mode();
+        // Another Item may have been renamed, added or removed.
+        self.refresh_links(cx);
         if mode != self.mode {
             self.set_mode(mode, window, cx);
         }
@@ -433,6 +440,36 @@ impl ItemEditor {
 
     /// Puts the body into the editor for the current mode. Neither editor
     /// reports this as an edit.
+    /// Tells the block editor what each Link in the body points at, so its
+    /// chips show titles and states. The editor repaints only when the answer
+    /// differs from the last one.
+    fn refresh_links(&self, cx: &mut Context<Self>) {
+        let model = self.model.clone();
+        self.block.update(cx, |block, cx| {
+            let model = model.read(cx);
+            let index = model.index();
+            let mut directory = WikiLinkDirectory::new();
+            for slug in block.wiki_link_slugs() {
+                if let LinkTarget::Found { item, ambiguous } = index.resolve(&slug) {
+                    let title = index.title(&item).unwrap_or_else(|| item.slug());
+                    let state = if ambiguous {
+                        WikiLinkState::Ambiguous
+                    } else {
+                        WikiLinkState::Working
+                    };
+                    directory.insert(
+                        slug,
+                        WikiLinkInfo {
+                            title: title.into(),
+                            state,
+                        },
+                    );
+                }
+            }
+            block.set_wiki_links(Arc::new(directory), cx);
+        });
+    }
+
     fn load_body(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let body = self.body.clone();
         match self.mode {
@@ -443,6 +480,7 @@ impl ItemEditor {
                 if let Err(err) = result {
                     eprintln!("sett: couldn't show the block view: {err}");
                 }
+                self.refresh_links(cx);
             }
             EditorMode::Raw => self
                 .raw
