@@ -233,6 +233,7 @@ impl ChipMap {
 }
 
 #[cfg(test)]
+#[allow(clippy::single_range_in_vec_init)] // Test data: one-element lists of spans.
 mod tests {
     use super::*;
     use gpui_kit::base::text::editor_host::{LinkMark, TextMark};

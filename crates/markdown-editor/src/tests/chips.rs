@@ -1,6 +1,8 @@
 //! FORK: Link chips in the projection (`wiki_chip.rs`, `direct.rs`,
 //! `projection.rs`).
 
+#![allow(clippy::single_range_in_vec_init)] // Test data: one-element lists of spans.
+
 use super::*;
 use crate::{
     position::BlockPosition,
