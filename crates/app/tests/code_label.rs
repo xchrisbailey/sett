@@ -77,9 +77,11 @@ fn clicking_the_label_leaves_the_caret_and_the_file_alone(cx: &mut TestAppContex
     })
     .unwrap();
     cx.run_until_parked();
-    // The caret is still at the end of the body, so this lands after "end".
+    // The click opened the Language Menu; close it without a pick.
+    // The caret is still at the end of the body, so the "!" lands after "end".
     cx.update_window(f.window, |_, window, cx| {
         window.render_frame(cx);
+        window.press("escape", cx);
         window.input("!", cx);
     })
     .unwrap();
