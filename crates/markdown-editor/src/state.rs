@@ -85,6 +85,8 @@ actions!(
         InsertMenuPick,
         InsertMenuClose,
         OpenCalloutMenu,
+        // FORK: the Code Block language label's menu (#67).
+        OpenLanguageMenu,
         CalloutMenuUp,
         CalloutMenuDown,
         CalloutMenuPick,
@@ -233,6 +235,8 @@ pub(crate) fn init(cx: &mut App) {
         // FORK: the Callout type menu, for the callout holding the caret;
         // elsewhere the keystroke propagates.
         KeyBinding::new(platform_key!("cmd", "alt-c"), OpenCalloutMenu, ctx),
+        // FORK: the Language Menu for the Code Block holding the caret (#67).
+        KeyBinding::new(platform_key!("cmd", "alt-l"), OpenLanguageMenu, ctx),
         // FORK: follow the Link the caret is in or touches; elsewhere the
         // keystroke propagates. Cmd/Ctrl-Enter is taken by `ExitBlock`.
         KeyBinding::new(platform_key!("cmd", "alt-enter"), FollowWikiLink, ctx),
@@ -1687,6 +1691,12 @@ impl BlockEditorState {
     /// under the window point `at`, as of the last frame.
     pub fn callout_header_at(&self, at: Point<Pixels>) -> Option<BlockId> {
         self.frame.borrow().callout_header_at(at)
+    }
+
+    /// FORK: the Code Block whose language label is drawn under the window
+    /// point `at`, as of the last frame. #67 opens the Language Menu from it.
+    pub fn code_label_at(&self, at: Point<Pixels>) -> Option<BlockId> {
+        self.frame.borrow().code_label_at(at)
     }
 
     /// The url of the link under the mouse, if any (D14 hover).

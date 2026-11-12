@@ -178,6 +178,8 @@ pub(crate) struct FrameLayout {
     pub(crate) content: Option<Bounds<Pixels>>,
     /// FORK: each drawn Callout's header row, for the type menu.
     pub(crate) callout_headers: Vec<(BlockId, Bounds<Pixels>)>,
+    /// FORK: each drawn Code Block's language label.
+    pub(crate) code_labels: Vec<(BlockId, Bounds<Pixels>)>,
 }
 
 impl FrameLayout {
@@ -207,6 +209,14 @@ impl FrameLayout {
     /// FORK: the Callout whose header row is under a window point.
     pub(crate) fn callout_header_at(&self, at: Point<Pixels>) -> Option<BlockId> {
         self.callout_headers
+            .iter()
+            .find(|(_, bounds)| bounds.contains(&at))
+            .map(|(id, _)| *id)
+    }
+
+    /// FORK: the Code Block whose language label is under a window point.
+    pub(crate) fn code_label_at(&self, at: Point<Pixels>) -> Option<BlockId> {
+        self.code_labels
             .iter()
             .find(|(_, bounds)| bounds.contains(&at))
             .map(|(id, _)| *id)

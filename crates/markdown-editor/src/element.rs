@@ -164,6 +164,8 @@ impl RenderOnce for BlockEditor {
         let mut children: Vec<AnyElement> = Vec::new();
         // FORK: callout header bounds, filled at prepaint (`callout.rs`).
         let callout_headers = super::callout::HeaderSink::default();
+        // FORK: code language label bounds (`code_label.rs`).
+        let code_labels = super::code_label::LabelSink::default();
         {
             let mut cull_state = cull.borrow_mut();
             cull_state.measured.clear();
@@ -315,6 +317,19 @@ impl RenderOnce for BlockEditor {
                             cx,
                         )
                     }
+                    // FORK: a Code Block gets our language label (#66).
+                    (None, BlockNode::CodeBlock(_)) => super::code_label::render(
+                        super::code_label::CodeBox {
+                            node,
+                            id: unit.id,
+                            ix: node_ix,
+                            flow: flow.last(is_last_node),
+                            node_cx: &node_cx,
+                            labels: &code_labels,
+                        },
+                        window,
+                        cx,
+                    ),
                     _ => node.render(node_ix, flow.last(is_last_node), &node_cx, window, cx),
                 };
                 // Per-block accessibility node around the rendered block.
@@ -485,6 +500,7 @@ impl RenderOnce for BlockEditor {
                 content_bounds,
                 // FORK
                 callout_headers,
+                code_labels,
                 padding: root_style.padding,
                 typography,
                 caret_was_visible,
@@ -506,6 +522,8 @@ struct EditorRoot {
     content_bounds: Rc<Cell<Bounds<Pixels>>>,
     /// FORK: where callout headers record their bounds this frame.
     callout_headers: super::callout::HeaderSink,
+    /// FORK: where code language labels record their bounds this frame.
+    code_labels: super::code_label::LabelSink,
     padding: Edges<DefiniteLength>,
     typography: TextStyle,
     caret_was_visible: bool,
@@ -603,6 +621,7 @@ impl Element for EditorRoot {
         if let Some(backgrounds) = self.backgrounds.take() {
             // FORK: collect this frame's callout headers.
             self.callout_headers.borrow_mut().clear();
+            self.code_labels.borrow_mut().clear();
             let (_, geometries) = collect_leaf_geometry(backgrounds, || child.prepaint(window, cx));
             // Swap in the complete frame; handlers read it until the next one.
             let mut frame = super::frame::into_frame(
@@ -613,6 +632,7 @@ impl Element for EditorRoot {
             frame.content = Some(self.content_bounds.get());
             // FORK
             frame.callout_headers = self.callout_headers.take();
+            frame.code_labels = self.code_labels.take();
             {
                 let state = self.state.read(cx);
                 let doc = &state.model.doc;
@@ -870,6 +890,14 @@ impl Element for EditorRoot {
                     state.click_callout_header(event.position, cx)
                 })
             {
+                let focus = entity.read(cx).focus_handle.clone();
+                window.focus(&focus, cx);
+                cx.stop_propagation();
+                return;
+            }
+            // FORK: a Code Block's language label takes the click and leaves
+            // the caret where it is; #67 opens the Language Menu here.
+            if !event.modifiers.shift && entity.read(cx).code_label_at(event.position).is_some() {
                 let focus = entity.read(cx).focus_handle.clone();
                 window.focus(&focus, cx);
                 cx.stop_propagation();

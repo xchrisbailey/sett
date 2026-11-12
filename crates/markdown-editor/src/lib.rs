@@ -48,6 +48,7 @@ mod callout;
 mod color;
 // FORK: the Callout type menu.
 mod callout_menu;
+mod code_label;
 mod command;
 mod cull;
 mod direct;
