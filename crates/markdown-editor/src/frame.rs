@@ -156,7 +156,6 @@ impl LeafGeom {
     }
 
     /// FORK: the model range of the closed Link chip drawn under `at`.
-    #[allow(dead_code)] // For the click and Cmd-click tickets.
     pub(crate) fn chip_at(&self, at: Point<Pixels>) -> Option<Range<usize>> {
         let rendered = self.geometry.atom_at(at)?;
         self.info.chips.as_ref()?.span_at_rendered(&rendered)

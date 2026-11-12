@@ -440,6 +440,9 @@ pub struct BlockEditorState {
     /// Remembered x for repeated up/down.
     goal_x: Option<Pixels>,
     pub(crate) dragging: bool,
+    /// FORK: a plain press on a closed Link chip, opened on release unless
+    /// the press became a drag.
+    chip_press: Option<(BlockId, Range<usize>)>,
     /// A press on a block handle, and the drag to reorder it (D22).
     pub(crate) block_drag: Option<BlockDrag>,
     /// FORK: `pub(crate)` for the menus in `insert_menu.rs` and
@@ -533,6 +536,7 @@ impl BlockEditorState {
             composition_open: false,
             goal_x: None,
             dragging: false,
+            chip_press: None,
             block_drag: None,
             readonly: false,
             toolbar_hidden: false,
@@ -1805,6 +1809,35 @@ impl BlockEditorState {
                 _ => None,
             }
         })
+    }
+
+    /// FORK: remembers a plain press on a closed Link chip (`chip_at`). The
+    /// press itself places the caret at the nearer edge, so a drag from the
+    /// chip never starts inside it.
+    pub(crate) fn press_chip(&mut self, at: Point<Pixels>) {
+        let hit = self.frame.borrow().hit_test(at);
+        self.chip_press = hit.and_then(|pos| {
+            let span = self.frame.borrow().leaf(pos.block)?.chip_at(at)?;
+            Some((pos.block, span))
+        });
+    }
+
+    /// FORK: releasing on the chip that was pressed, with no drag in
+    /// between, opens it: the caret goes just before `]]`.
+    pub(crate) fn release_chip(&mut self, cx: &mut Context<Self>) {
+        let Some((block, span)) = self.chip_press.take() else {
+            return;
+        };
+        let at_edge = matches!(
+            self.model.selection(),
+            BlockSelection::Text { anchor, head }
+                if anchor == head
+                    && anchor.block == block
+                    && (anchor.offset == span.start || anchor.offset == span.end)
+        );
+        if at_edge {
+            self.move_to(BlockPosition::new(block, span.end - 2), false, cx);
+        }
     }
 
     /// Mouse: place or extend the caret at a window point.

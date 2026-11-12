@@ -250,6 +250,47 @@ fn click_then_type(cx: &mut TestAppContext, dx: f32, of_width: bool) -> String {
     cx.update(|cx| editor.read(cx).source())
 }
 
+/// Presses at `from` and drags to `to` (fractions of the chip's width from its
+/// left edge), types "X" and returns the source.
+fn drag_then_type(cx: &mut TestAppContext, from: f32, to: f32) -> String {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        markdown_editor::init(cx);
+    });
+    let (window, host) = cx
+        .update(|cx| {
+            gpui_kit::open_window(
+                WindowOptions {
+                    window_bounds: Some(WindowBounds::Windowed(Bounds::new(
+                        Default::default(),
+                        size(px(800.), px(600.)),
+                    ))),
+                    ..Default::default()
+                },
+                cx,
+                |window, cx| {
+                    let editor = cx.new(|cx| BlockEditorState::new(window, cx).with_source(LINE));
+                    cx.new(|_| Host { editor })
+                },
+            )
+        })
+        .unwrap();
+    let editor = cx.update(|cx| host.read(cx).editor.clone());
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        let chip = window.find_by_label("budget (not found)").bounds();
+        let at = |f: f32| point(chip.left() + chip.size.width * f, chip.center().y);
+        window.pointer_move(at(from), None, cx);
+        window.pointer_down(at(from), MouseButton::Left, cx);
+        window.pointer_move(at(to), Some(MouseButton::Left), cx);
+        window.pointer_up(at(to), MouseButton::Left, cx);
+        window.input("X", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update(|cx| editor.read(cx).source())
+}
+
 #[gpui_kit::test]
 fn clicks_beside_a_chip_land_at_the_right_offsets(cx: &mut TestAppContext) {
     // Just right of the chip: after `]]`, before " cd".
@@ -262,11 +303,81 @@ fn clicks_left_of_a_chip_land_before_it(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn a_click_on_a_chip_snaps_to_its_nearer_edge(cx: &mut TestAppContext) {
-    assert_eq!(click_then_type(cx, 0.25, true), "ab X[[budget]] cd");
+fn a_click_on_a_chip_opens_it_with_the_caret_before_the_closing_brackets(cx: &mut TestAppContext) {
+    assert_eq!(click_then_type(cx, 0.25, true), "ab [[budgetX]] cd");
+    assert_eq!(click_then_type(cx, 0.75, true), "ab [[budgetX]] cd");
+}
+
+fn saved(cx: &mut TestAppContext, path: &PathBuf) -> String {
+    settle(cx);
+    fs::read_to_string(path).unwrap()
 }
 
 #[gpui_kit::test]
-fn a_click_on_the_far_half_of_a_chip_snaps_after_it(cx: &mut TestAppContext) {
-    assert_eq!(click_then_type(cx, 0.75, true), "ab [[budget]]X cd");
+fn backspace_after_a_chip_removes_the_whole_link_and_one_undo_restores_it(cx: &mut TestAppContext) {
+    let (f, path) = open_plan(cx, "See [[budget]]\n");
+    let before = saved(cx, &path);
+    press(cx, &f, "backspace", 1);
+    assert_eq!(saved(cx, &path), "---\ntitle: Plan\n---\nSee \n");
+    press(cx, &f, "secondary-z", 1);
+    assert_eq!(saved(cx, &path), before);
+}
+
+#[gpui_kit::test]
+fn delete_before_a_chip_removes_the_whole_link_and_one_undo_restores_it(cx: &mut TestAppContext) {
+    let (f, path) = open_plan(cx, "See [[budget]]\n");
+    let before = saved(cx, &path);
+    // Ten steps left: just before `[[`, outside the chip.
+    press(cx, &f, "left", 10);
+    press(cx, &f, "delete", 1);
+    assert_eq!(saved(cx, &path), "---\ntitle: Plan\n---\nSee \n");
+    press(cx, &f, "secondary-z", 1);
+    assert_eq!(saved(cx, &path), before);
+}
+
+#[gpui_kit::test]
+fn backspace_inside_an_open_chip_removes_one_character(cx: &mut TestAppContext) {
+    let (f, path) = open_plan(cx, "See [[budget]]\n");
+    press(cx, &f, "left", 2);
+    press(cx, &f, "backspace", 1);
+    assert!(saved(cx, &path).ends_with("See [[budge]]\n"));
+}
+
+#[gpui_kit::test]
+fn copying_across_a_chip_and_pasting_keeps_the_link_text(cx: &mut TestAppContext) {
+    let (f, path) = open_plan(cx, "See [[budget]] end\n");
+    press(cx, &f, "shift-left", 14);
+    press(cx, &f, "secondary-c", 1);
+    press(cx, &f, "secondary-down", 1);
+    press(cx, &f, "secondary-v", 1);
+    assert!(saved(cx, &path).ends_with("See [[budget]] end[[budget]] end\n"));
+}
+
+#[gpui_kit::test]
+fn typing_a_link_by_hand_ends_with_a_closed_chip(cx: &mut TestAppContext) {
+    let (f, path) = open_plan(cx, "See\n");
+    cx.update_window(f.window, |_, window, cx| {
+        for c in " [[budget]]".chars() {
+            window.input(&c.to_string(), cx);
+        }
+    })
+    .unwrap();
+    cx.run_until_parked();
+    let text = saved(cx, &path);
+    assert!(text.ends_with("See [[budget]]\n"), "{text:?}");
+    assert!(has_label(cx, &f, "Budget plan"));
+}
+
+#[gpui_kit::test]
+fn a_drag_from_a_chip_starts_at_its_edge_and_does_not_open_it(cx: &mut TestAppContext) {
+    // From the near half out to the end of the line.
+    assert_eq!(drag_then_type(cx, 0.25, 8.0), "ab X");
+    // From the far half back to the start of the line.
+    assert_eq!(drag_then_type(cx, 0.75, -8.0), "X cd");
+}
+
+#[gpui_kit::test]
+fn a_drag_ending_on_a_chip_stops_at_its_edge(cx: &mut TestAppContext) {
+    assert_eq!(drag_then_type(cx, 8.0, 0.25), "ab X");
+    assert_eq!(drag_then_type(cx, 8.0, 0.75), "ab [[budget]]X");
 }
