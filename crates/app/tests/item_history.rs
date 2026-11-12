@@ -218,3 +218,26 @@ fn the_journal_is_part_of_the_history(cx: &mut TestAppContext) {
     })
     .unwrap();
 }
+
+#[gpui_kit::test]
+fn back_from_the_board_reopens_the_task_just_closed(cx: &mut TestAppContext) {
+    let f = setup(cx);
+    follow(cx, &f, "alpha");
+    follow(cx, &f, "fix-bug");
+    // Escape is the Task view's "Back to Board".
+    press(cx, &f, "escape");
+    cx.update_window(f.window, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("task-title").is_none());
+    })
+    .unwrap();
+
+    press(cx, &f, BACK);
+    cx.update_window(f.window, |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(window.find("task-title").value(), Some("Fix bug"));
+    })
+    .unwrap();
+    press(cx, &f, BACK);
+    assert_eq!(title(cx, &f), "Alpha");
+}

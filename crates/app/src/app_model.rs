@@ -168,20 +168,42 @@ impl AppModel {
     }
 
     fn step(&mut self, direction: Direction, cx: &mut Context<Self>) {
+        let showing = self.showing();
         let index = &self.index;
         let Some(history) = self.histories.get_mut(&index.space()) else {
             return;
         };
-        let Some(item) = history.step(direction, |item| {
-            // A Journal Entry's file is only created on its first edit, so any
-            // date can be reopened.
-            matches!(item, ItemId::Journal(_)) || index.title(item).is_some()
-        }) else {
+        // A Journal Entry's file is only created on its first edit, so any
+        // date can be reopened.
+        let exists =
+            |item: &ItemId| matches!(item, ItemId::Journal(_)) || index.title(item).is_some();
+        // Once the user has gone back to a Board or list, the last Item they
+        // looked at is still the current entry, so Back reopens it rather
+        // than skipping past it.
+        let reopen = match direction {
+            Direction::Back => history.current().filter(|item| {
+                !showing.as_ref().is_some_and(|shown| shown == item) && exists(item)
+            }),
+            Direction::Forward => None,
+        };
+        let Some(item) = reopen.or_else(|| history.step(direction, exists)) else {
             return;
         };
         // The history already points at `item`, so the views recording the
         // open find it current and add nothing.
         self.open_item_at(item, None, cx);
+    }
+
+    /// The Item the active Space has on screen: the open one, or the Journal
+    /// Entry the Journal shows (which it records as a visit, not as open).
+    fn showing(&self) -> Option<ItemId> {
+        let open = self.open_items.get(&self.space()).cloned();
+        let journal = self.histories.get(&self.space()).and_then(History::current);
+        match (self.selection(), open) {
+            (_, Some(item)) => Some(item),
+            (Selection::Journal, None) => journal.filter(|item| matches!(item, ItemId::Journal(_))),
+            _ => None,
+        }
     }
 
     /// Selects where an Item of the active Space lives and asks the view
@@ -595,6 +617,10 @@ impl History {
         }
         self.entries.push(item);
         self.current = self.entries.len() - 1;
+    }
+
+    fn current(&self) -> Option<ItemId> {
+        self.entries.get(self.current).cloned()
     }
 
     /// Moves to the nearest entry in `direction` that `exists` and returns it.
