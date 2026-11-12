@@ -76,6 +76,16 @@ actions!(
         TableInsertRowBelow,
         TableDeleteLine,
         CloseTableMenu,
+        // FORK: the Insert Menu and the Callout type menu.
+        InsertMenuUp,
+        InsertMenuDown,
+        InsertMenuPick,
+        InsertMenuClose,
+        OpenCalloutMenu,
+        CalloutMenuUp,
+        CalloutMenuDown,
+        CalloutMenuPick,
+        CalloutMenuClose,
         Indent,
         Outdent,
         Copy,
@@ -211,6 +221,9 @@ pub(crate) fn init(cx: &mut App) {
         KeyBinding::new(platform_key!("cmd", "alt-down"), TableInsertRowBelow, ctx),
         KeyBinding::new(platform_key!("cmd", "alt-backspace"), TableDeleteLine, ctx),
         KeyBinding::new("escape", CloseTableMenu, Some("BlockEditor && table_menu")),
+        // FORK: the Callout type menu, for the callout holding the caret;
+        // elsewhere the keystroke propagates.
+        KeyBinding::new(platform_key!("cmd", "alt-c"), OpenCalloutMenu, ctx),
         KeyBinding::new("shift-enter", SoftBreak, ctx),
         KeyBinding::new(platform_key!("cmd", "enter"), ExitBlock, ctx),
         KeyBinding::new(platform_key!("cmd", "c"), Copy, ctx),
@@ -228,6 +241,31 @@ pub(crate) fn init(cx: &mut App) {
             "ctrl-enter",
             SoftBreak,
             Some("BlockEditor && submit == enter"),
+        ),
+        // FORK: the Insert Menu's keys win over the editor's while it is
+        // open (registered last, so they take precedence).
+        KeyBinding::new("up", InsertMenuUp, Some("BlockEditor && insert_menu")),
+        KeyBinding::new("down", InsertMenuDown, Some("BlockEditor && insert_menu")),
+        KeyBinding::new("enter", InsertMenuPick, Some("BlockEditor && insert_menu")),
+        KeyBinding::new("tab", InsertMenuPick, Some("BlockEditor && insert_menu")),
+        KeyBinding::new(
+            "escape",
+            InsertMenuClose,
+            Some("BlockEditor && insert_menu"),
+        ),
+        // FORK: the Callout type menu's keys, likewise.
+        KeyBinding::new("up", CalloutMenuUp, Some("BlockEditor && callout_menu")),
+        KeyBinding::new("down", CalloutMenuDown, Some("BlockEditor && callout_menu")),
+        KeyBinding::new(
+            "enter",
+            CalloutMenuPick,
+            Some("BlockEditor && callout_menu"),
+        ),
+        KeyBinding::new("tab", CalloutMenuPick, Some("BlockEditor && callout_menu")),
+        KeyBinding::new(
+            "escape",
+            CalloutMenuClose,
+            Some("BlockEditor && callout_menu"),
         ),
     ]);
 }
@@ -386,7 +424,9 @@ pub struct BlockEditorState {
     pub(crate) dragging: bool,
     /// A press on a block handle, and the drag to reorder it (D22).
     pub(crate) block_drag: Option<BlockDrag>,
-    readonly: bool,
+    /// FORK: `pub(crate)` for the menus in `insert_menu.rs` and
+    /// `callout_menu.rs`.
+    pub(crate) readonly: bool,
     image_policy: super::ImagePolicy,
     submit_policy: SubmitPolicy,
     clipboard_policy: ClipboardPolicy,
@@ -399,6 +439,11 @@ pub struct BlockEditorState {
     pub(crate) pointer_hand: bool,
     /// The open table grip menu (D20).
     pub(crate) table_menu: Option<super::table_ui::TableMenu>,
+    /// FORK: the open Insert Menu, and the options it offers.
+    pub(crate) insert_menu: Option<super::menu::OpenMenu>,
+    pub(crate) insert_menu_options: Vec<super::insert_menu::InsertMenuOption>,
+    /// FORK: the open Callout type menu.
+    pub(crate) callout_menu: Option<super::menu::OpenMenu>,
     /// The table grips the pointer shows (to repaint on change).
     pub(crate) table_hover: Vec<(BlockId, crate::TableLine)>,
     /// The pointer is on a table grip (grab cursor).
@@ -430,6 +475,9 @@ impl BlockEditorState {
                 this.blink_cursor.update(cx, |b, cx| b.stop(cx));
                 this.model.break_coalescing();
                 this.end_composition();
+                // FORK: blur closes the menus.
+                this.insert_menu = None;
+                this.callout_menu = None;
                 cx.emit(BlockEditorEvent::Blur);
             }),
             cx.observe_window_activation(window, |this, window, cx| {
@@ -468,6 +516,10 @@ impl BlockEditorState {
             hovered_link: None,
             pointer_hand: false,
             table_menu: None,
+            // FORK
+            insert_menu: None,
+            insert_menu_options: super::insert_menu::InsertMenuOption::defaults(),
+            callout_menu: None,
             table_hover: Vec::new(),
             grip_hover: false,
             _subscriptions: subscriptions,
@@ -483,16 +535,23 @@ impl BlockEditorState {
     pub fn set_submit_policy(&mut self, policy: SubmitPolicy) {
         self.submit_policy = policy;
     }
-    pub(crate) fn key_context(&self) -> &'static str {
-        match (
-            self.submit_policy == SubmitPolicy::Enter,
-            self.table_menu.is_some(),
-        ) {
-            (true, false) => "BlockEditor submit=enter",
-            (true, true) => "BlockEditor submit=enter table_menu",
-            (false, false) => CONTEXT,
-            (false, true) => "BlockEditor table_menu",
+    /// FORK: built as a string, so the `insert_menu` and `callout_menu`
+    /// contexts combine with the others; upstream matched on a fixed set.
+    pub(crate) fn key_context(&self) -> String {
+        let mut context = String::from(CONTEXT);
+        if self.submit_policy == SubmitPolicy::Enter {
+            context.push_str(" submit=enter");
         }
+        if self.table_menu.is_some() {
+            context.push_str(" table_menu");
+        }
+        if self.insert_menu.is_some() {
+            context.push_str(" insert_menu");
+        }
+        if self.callout_menu.is_some() {
+            context.push_str(" callout_menu");
+        }
+        context
     }
     pub fn with_clipboard_policy(mut self, policy: ClipboardPolicy) -> Self {
         self.clipboard_policy = policy;
@@ -526,6 +585,17 @@ impl BlockEditorState {
         filter: impl Fn(super::InputRule, &str) -> bool + Send + Sync + 'static,
     ) -> Self {
         self.input_rule_filter = Some(Arc::new(filter));
+        self
+    }
+
+    /// FORK: builder for the Insert Menu's options. The default is
+    /// [`InsertMenuOption::defaults`](super::InsertMenuOption::defaults); pass an
+    /// empty list to turn the menu off.
+    pub fn with_insert_menu_options(
+        mut self,
+        options: impl IntoIterator<Item = super::insert_menu::InsertMenuOption>,
+    ) -> Self {
+        self.insert_menu_options = options.into_iter().collect();
         self
     }
 
@@ -669,6 +739,13 @@ impl BlockEditorState {
     }
     pub fn is_composing(&self) -> bool {
         self.marked.is_some()
+    }
+
+    /// FORK: like `is_composing`, but also true during a composition's first
+    /// edit, which runs before its marked range is recorded. The Insert Menu
+    /// holds still for all of it.
+    pub(crate) fn composition_in_progress(&self) -> bool {
+        self.marked.is_some() || self.composition_open
     }
 
     /// The headless model (document, selection, history).
@@ -880,7 +957,12 @@ impl BlockEditorState {
 
     // ---- internal edit plumbing -------------------------------------------
 
-    fn after_edit(&mut self, origin: EditOrigin, cx: &mut Context<Self>) {
+    /// FORK: `pub(crate)` for the menus' picks.
+    pub(crate) fn after_edit(&mut self, origin: EditOrigin, cx: &mut Context<Self>) {
+        // FORK: refilter or close the Insert Menu. The type menu is for the
+        // document as it was when it opened, so it closes.
+        self.sync_insert_menu();
+        self.callout_menu = None;
         self.goal_x = None;
         self.reveal.set(true);
         self.pause_blink(cx);
@@ -893,6 +975,10 @@ impl BlockEditorState {
     }
 
     fn selection_changed(&mut self, cx: &mut Context<Self>) {
+        // FORK: a caret move closes the type menu, and the Insert Menu once
+        // the caret leaves its paragraph.
+        self.sync_insert_menu();
+        self.callout_menu = None;
         self.reveal.set(true);
         self.pause_blink(cx);
         cx.emit(BlockEditorEvent::SelectionChanged);
@@ -923,11 +1009,15 @@ impl BlockEditorState {
         }
     }
 
-    fn end_composition(&mut self) {
+    /// FORK: `pub(crate)` for the callout type menu.
+    pub(crate) fn end_composition(&mut self) {
         self.marked = None;
         if std::mem::take(&mut self.composition_open) {
             self.model.history.commit_transaction();
         }
+        // FORK: the Insert Menu held still while composing; the committed
+        // (or cancelled) text filters it now.
+        self.sync_insert_menu();
     }
 
     /// Whether an IME undo group is open (tests: it must never leak).
@@ -1475,6 +1565,12 @@ impl BlockEditorState {
         let url = inline.mark_after(pos.offset)?.link.as_ref()?.url.clone();
         let range = link_extent(inline, pos.offset, &url)?;
         Some((pos.block, range, url))
+    }
+
+    /// FORK: the Callout whose header row (icon and type name) is drawn
+    /// under the window point `at`, as of the last frame.
+    pub fn callout_header_at(&self, at: Point<Pixels>) -> Option<BlockId> {
+        self.frame.borrow().callout_header_at(at)
     }
 
     /// The url of the link under the mouse, if any (D14 hover).
@@ -2220,6 +2316,75 @@ impl BlockEditorState {
     ) {
         self.close_table_menu(cx);
     }
+    // FORK: the Insert Menu's and Callout type menu's key actions.
+    pub(crate) fn on_insert_menu_up(
+        &mut self,
+        _: &InsertMenuUp,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.insert_menu_move(false, cx);
+    }
+    pub(crate) fn on_insert_menu_down(
+        &mut self,
+        _: &InsertMenuDown,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.insert_menu_move(true, cx);
+    }
+    pub(crate) fn on_insert_menu_pick(
+        &mut self,
+        _: &InsertMenuPick,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(ix) = self.insert_menu_highlighted() {
+            self.insert_menu_pick(ix, cx);
+        }
+    }
+    pub(crate) fn on_insert_menu_close(
+        &mut self,
+        _: &InsertMenuClose,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.close_menu(super::menu::MenuSlot::Insert, cx);
+    }
+    pub(crate) fn on_callout_menu_up(
+        &mut self,
+        _: &CalloutMenuUp,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.callout_menu_move(false, cx);
+    }
+    pub(crate) fn on_callout_menu_down(
+        &mut self,
+        _: &CalloutMenuDown,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.callout_menu_move(true, cx);
+    }
+    pub(crate) fn on_callout_menu_pick(
+        &mut self,
+        _: &CalloutMenuPick,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(ix) = self.callout_menu.as_ref().map(|m| m.highlighted) {
+            self.callout_menu_pick(ix, cx);
+        }
+    }
+    pub(crate) fn on_callout_menu_close(
+        &mut self,
+        _: &CalloutMenuClose,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.close_menu(super::menu::MenuSlot::Callout, cx);
+    }
     fn table_key(&mut self, edit: Option<crate::TableEdit>, cx: &mut Context<Self>) {
         if self.readonly || self.model.current_cell().is_none() {
             cx.propagate();
@@ -2703,6 +2868,9 @@ fn command_name(command: &EditorCommand) -> &'static str {
         EditorCommand::ToggleList { .. } => "toggle_list",
         EditorCommand::ToggleTask => "toggle_task",
         EditorCommand::ToggleBlockquote => "toggle_blockquote",
+        // FORK
+        EditorCommand::SetCallout(_) => "set_callout",
+        EditorCommand::InsertCallout(_) => "insert_callout",
         EditorCommand::SetTaskChecked(_) => "set_task_checked",
         EditorCommand::Indent => "indent",
         EditorCommand::Outdent => "outdent",
@@ -2778,8 +2946,10 @@ impl EntityInputHandler for BlockEditorState {
         Some(byte_to_utf16(text, m.range.start)..byte_to_utf16(text, m.range.end))
     }
 
-    fn unmark_text(&mut self, _: &mut Window, _: &mut Context<Self>) {
+    fn unmark_text(&mut self, _: &mut Window, cx: &mut Context<Self>) {
         self.end_composition();
+        // FORK: ending a composition can refilter or close the Insert Menu.
+        cx.notify();
     }
 
     fn paste(&mut self, item: ClipboardItem, _: &mut Window, cx: &mut Context<Self>) {
@@ -2805,7 +2975,10 @@ impl EntityInputHandler for BlockEditorState {
         };
         self.edit(origin, |m| m.insert_text(text, origin), cx);
         self.end_composition();
-        if text == " " {
+        // FORK: a typed `/` may open the Insert Menu.
+        if text == "/" && !composing {
+            self.maybe_open_insert_menu(cx);
+        } else if text == " " {
             self.apply_input_rule(cx);
         } else if text.ends_with(['`', '*', '~']) && self.rule_on(RuleKind::InlineMarks) {
             self.apply_mark_rule(cx);

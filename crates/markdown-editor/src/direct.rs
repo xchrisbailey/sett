@@ -151,7 +151,9 @@ impl NodeCache {
                 children: inline(),
                 span: None,
             },
-            BlockKindData::Blockquote => BlockNode::Blockquote {
+            // FORK: a Callout projects as a plain quote; `element.rs` draws
+            // its box.
+            BlockKindData::Blockquote { .. } => BlockNode::Blockquote {
                 children: children(self),
                 span: None,
             },
