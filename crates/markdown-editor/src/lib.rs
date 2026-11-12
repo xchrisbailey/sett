@@ -65,6 +65,7 @@ mod input_rule;
 // FORK: the Insert Menu.
 mod insert_menu;
 mod kind;
+mod language;
 // FORK: the Link Picker.
 mod link_picker;
 mod markdown_source;
@@ -102,6 +103,7 @@ pub use element::BlockEditor;
 pub use gpui_kit::base::text::editor_host::ColumnAlign;
 pub use input_rule::InputRule;
 pub use insert_menu::InsertMenuOption;
+pub use language::{CODE_BLOCK_LANGUAGES, display_name, highlights};
 pub use link_picker::LinkCandidate;
 /// Shows or hides the optional toolbar. Unbound by default; bind it in the
 /// `"BlockEditor"` key context, e.g. `KeyBinding::new("cmd-shift-t", ToggleToolbar, Some("BlockEditor"))`.
