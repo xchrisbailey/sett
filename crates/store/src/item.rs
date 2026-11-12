@@ -21,6 +21,9 @@ pub struct Task {
     pub due: Option<Date>,
     pub done: Option<Date>,
     pub body: String,
+    /// When the file was last written, by sett or anyone else. `None` for a
+    /// file whose time can't be read.
+    pub modified: Option<SystemTime>,
     /// Every frontmatter key as last read or written, so unknown keys survive
     /// a save in their original order.
     pub(crate) fields: Mapping,
@@ -47,6 +50,7 @@ impl Task {
             due: doc.date("due"),
             done: doc.date("done"),
             body: doc.body.clone(),
+            modified: None,
             fields: doc.fields,
             unreadable: doc.unreadable,
         }
@@ -190,6 +194,9 @@ pub struct JournalEntry {
     pub space: Space,
     pub date: Date,
     pub body: String,
+    /// When the file was last written, by sett or anyone else. `None` for an
+    /// entry without a file, or one whose time can't be read.
+    pub modified: Option<SystemTime>,
     /// Every frontmatter key as last read or written, so unknown keys survive
     /// a save in their original order.
     pub(crate) fields: Mapping,
@@ -210,6 +217,7 @@ impl JournalEntry {
             space,
             date,
             body: String::new(),
+            modified: None,
             fields: Mapping::new(),
             unreadable: None,
         }
@@ -220,6 +228,7 @@ impl JournalEntry {
             space,
             date,
             body: doc.body,
+            modified: None,
             fields: doc.fields,
             unreadable: doc.unreadable,
         }
