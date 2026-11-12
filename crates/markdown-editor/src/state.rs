@@ -85,7 +85,7 @@ actions!(
         InsertMenuPick,
         InsertMenuClose,
         OpenCalloutMenu,
-        // FORK: the Code Block language label's menu (#67).
+        // FORK: the Code Block language label's menu.
         OpenLanguageMenu,
         LanguageMenuUp,
         LanguageMenuDown,
@@ -239,7 +239,7 @@ pub(crate) fn init(cx: &mut App) {
         // FORK: the Callout type menu, for the callout holding the caret;
         // elsewhere the keystroke propagates.
         KeyBinding::new(platform_key!("cmd", "alt-c"), OpenCalloutMenu, ctx),
-        // FORK: the Language Menu for the Code Block holding the caret (#67).
+        // FORK: the Language Menu for the Code Block holding the caret.
         KeyBinding::new(platform_key!("cmd", "alt-l"), OpenLanguageMenu, ctx),
         // FORK: follow the Link the caret is in or touches; elsewhere the
         // keystroke propagates. Cmd/Ctrl-Enter is taken by `ExitBlock`.
@@ -1766,7 +1766,7 @@ impl BlockEditorState {
     }
 
     /// FORK: the Code Block whose language label is drawn under the window
-    /// point `at`, as of the last frame. #67 opens the Language Menu from it.
+    /// point `at`, as of the last frame; a click on it opens the Language Menu.
     pub fn code_label_at(&self, at: Point<Pixels>) -> Option<BlockId> {
         self.frame.borrow().code_label_at(at)
     }

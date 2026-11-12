@@ -50,6 +50,7 @@ mod code_clipboard;
 mod color;
 // FORK: the Callout type menu.
 mod callout_menu;
+// FORK: a Code Block's language label.
 mod code_label;
 mod command;
 mod cull;
@@ -66,7 +67,9 @@ mod input_rule;
 // FORK: the Insert Menu.
 mod insert_menu;
 mod kind;
+// FORK: which languages a Code Block highlights, and the Language Menu's list.
 mod language;
+// FORK: the Language Menu.
 mod language_menu;
 // FORK: the Link Picker.
 mod link_picker;
@@ -75,7 +78,7 @@ mod marks;
 // FORK: Links drawn as title chips.
 mod wiki_chip;
 mod wiki_link;
-// FORK: what the Insert Menu and the Callout type menu share.
+// FORK: what the four menus (Insert, Callout, Language, Link) share.
 mod menu;
 mod order;
 mod position;
@@ -105,6 +108,7 @@ pub use element::BlockEditor;
 pub use gpui_kit::base::text::editor_host::ColumnAlign;
 pub use input_rule::InputRule;
 pub use insert_menu::InsertMenuOption;
+// FORK: the language lookup and the Language Menu's list.
 pub use language::{CODE_BLOCK_LANGUAGES, display_name, highlights};
 pub use link_picker::LinkCandidate;
 /// Shows or hides the optional toolbar. Unbound by default; bind it in the

@@ -433,6 +433,8 @@ fn custom_markdown(node: &gpui_kit::base::text::MarkdownNode) -> String {
     }
 }
 
+// FORK: pulled out of the Code Block arm of `block` so a code-tagged
+// paste (`code_clipboard.rs`) builds the same fence.
 /// A fenced code block as Markdown. The fence is longer than any run of its
 /// delimiter inside the code, and uses `~` when the info string has a
 /// backtick.
