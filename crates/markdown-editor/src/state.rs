@@ -351,6 +351,12 @@ pub enum BlockEditorEvent {
     },
     Focus,
     Blur,
+    /// FORK: the Link Picker's "Create Note" row was picked. The host creates
+    /// the Note and answers with [`BlockEditorState::complete_link_pick`];
+    /// if it can't, it does nothing and the typed text stays as it was.
+    CreateLinkTargetRequested {
+        title: SharedString,
+    },
     /// Enter requested submission; emitted only outside IME composition. The
     /// owner applies completion/picker and domain-send policy, in that order.
     SubmitRequested,
