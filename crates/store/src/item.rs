@@ -32,6 +32,12 @@ pub struct Task {
 }
 
 impl Task {
+    /// This Item with the time its file was last written.
+    pub(crate) fn with_modified(mut self, modified: Option<SystemTime>) -> Task {
+        self.modified = modified;
+        self
+    }
+
     /// Whether the file's frontmatter couldn't be read. sett never writes such
     /// a file, so it must be fixed in another editor.
     pub fn frontmatter_error(&self) -> bool {
@@ -156,6 +162,12 @@ pub struct Note {
 }
 
 impl Note {
+    /// This Item with the time its file was last written.
+    pub(crate) fn with_modified(mut self, modified: Option<SystemTime>) -> Note {
+        self.modified = modified;
+        self
+    }
+
     /// Whether the file's frontmatter couldn't be read. sett never writes such
     /// a file, so it must be fixed in another editor.
     pub fn frontmatter_error(&self) -> bool {
@@ -205,6 +217,12 @@ pub struct JournalEntry {
 }
 
 impl JournalEntry {
+    /// This Item with the time its file was last written.
+    pub(crate) fn with_modified(mut self, modified: Option<SystemTime>) -> JournalEntry {
+        self.modified = modified;
+        self
+    }
+
     /// Whether the file's frontmatter couldn't be read. sett never writes such
     /// a file, so it must be fixed in another editor.
     pub fn frontmatter_error(&self) -> bool {

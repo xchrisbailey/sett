@@ -188,9 +188,8 @@ impl Store {
         let mut tasks: Vec<Task> = markdown_files(&dir)
             .into_iter()
             .map(|(slug, doc)| {
-                let mut task = Task::from_doc(space, project, &slug, doc);
-                task.modified = modified(&dir.join(md(&slug)));
-                task
+                Task::from_doc(space, project, &slug, doc)
+                    .with_modified(modified(&dir.join(md(&slug))))
             })
             .collect();
         tasks.sort_by(task_order);
@@ -216,9 +215,7 @@ impl Store {
             .project_dir(space, project)
             .join("tasks")
             .join(md(slug));
-        let mut task = Task::from_doc(space, project, slug, read_doc(&path)?);
-        task.modified = modified(&path);
-        Some(task)
+        Some(Task::from_doc(space, project, slug, read_doc(&path)?).with_modified(modified(&path)))
     }
 
     pub fn note(&self, space: Space, project: Option<&str>, slug: &str) -> Option<Note> {
@@ -226,16 +223,12 @@ impl Store {
             return None;
         }
         let path = self.notes_dir(space, project).join(md(slug));
-        let mut note = Note::from_doc(space, project, slug, read_doc(&path)?);
-        note.modified = modified(&path);
-        Some(note)
+        Some(Note::from_doc(space, project, slug, read_doc(&path)?).with_modified(modified(&path)))
     }
 
     pub fn journal_entry(&self, space: Space, date: Date) -> Option<JournalEntry> {
         let path = self.journal_dir(space).join(md(&date.to_string()));
-        let mut entry = JournalEntry::from_doc(space, date, read_doc(&path)?);
-        entry.modified = modified(&path);
-        Some(entry)
+        Some(JournalEntry::from_doc(space, date, read_doc(&path)?).with_modified(modified(&path)))
     }
 
     /// Space-level Notes when `project` is `None`, otherwise that Project's.
@@ -244,9 +237,8 @@ impl Store {
         markdown_files(&dir)
             .into_iter()
             .map(|(slug, doc)| {
-                let mut note = Note::from_doc(space, project, &slug, doc);
-                note.modified = modified(&dir.join(md(&slug)));
-                note
+                Note::from_doc(space, project, &slug, doc)
+                    .with_modified(modified(&dir.join(md(&slug))))
             })
             .collect()
     }
@@ -258,9 +250,10 @@ impl Store {
         let mut entries: Vec<JournalEntry> = markdown_files(&dir)
             .into_iter()
             .filter_map(|(stem, doc)| {
-                let mut entry = JournalEntry::from_doc(space, Date::parse(&stem)?, doc);
-                entry.modified = modified(&dir.join(md(&stem)));
-                Some(entry)
+                Some(
+                    JournalEntry::from_doc(space, Date::parse(&stem)?, doc)
+                        .with_modified(modified(&dir.join(md(&stem)))),
+                )
             })
             .collect();
         entries.sort_by_key(|e| e.date);
