@@ -18,7 +18,13 @@ Imports: `use gpui_kit::*;` gives GPUI. `gpui_kit::component` re-exports `h_flex
 - **Tests that trash set their own Trash** with `Store::set_trash` or `AppModel::set_trash`. Only `AppModel::open` turns on the real macOS Trash; without either, trashing fails.
 - **Shared UI helpers** live in `crates/app/tests/common/mod.rs`: `open_shell`, `click_label`, `right_click_label`, `find_label`.
 - **`test-support`** is enabled on gpui-kit only for `crates/app` (dev-dependency). Turning it on forced `taffy` down to 0.15 and `unicode-properties` down to 0.1.3 in the lockfile. The forked editor's own view tests sit behind its `view-tests` feature because `test-support` doesn't resolve there.
-- **Looking at the UI:** `scripts/screenshot` captures the real window against fixture data. Read the PNG to check layout yourself.
+- **Looking at the UI:** `scripts/screenshot` captures the real window against fixture data. Read the PNG to check layout yourself. Run it as its own Bash call that starts with `scripts/screenshot`, with full paths and nothing like `X=...;` before it: the sandbox exception in `.claude/settings.json` only matches that form, and inside the sandbox the capture fails with "could not create image from window". Use `--delay SECS` rather than an environment variable.
+- **`update_window` on `TestAppContext`** needs `use gpui_kit::AppContext as _;` in scope, or the call fails with E0599 ("no method named `update_window`").
+
+## Editor fork
+
+- **`crates/markdown-editor/FORK.md`** lists every patch to the forked block editor and why, including what gpui-kit keeps private (gpui-base's Code Block label, the syntect language lookup). Read it before changing the editor.
+- **The clipboard is plain text on macOS.** gpui writes one string plus its own private metadata tag, and reads back only that string, file paths and images. It never reads HTML or RTF, so what another app puts there as rich text (a rendered GitHub README's `<pre lang=…>`, VS Code's language id) never reaches sett.
 
 ## Doc and source mismatches
 The `/component/*.md` doc pages disagree with the source in places:
