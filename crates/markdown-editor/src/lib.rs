@@ -67,6 +67,7 @@ mod markdown_source;
 // FORK: Links drawn as title chips.
 mod marks;
 mod wiki_chip;
+mod wiki_link;
 // FORK: what the Insert Menu and the Callout type menu share.
 mod menu;
 mod order;
@@ -104,6 +105,7 @@ pub use state::{BlockEditorEvent, BlockEditorState, ClipboardPolicy, PasteReques
 pub use style::BlockEditorStyle;
 pub use table::{TableEdit, TableLine};
 pub use toolbar::EditorToolbar;
+pub use wiki_link::{WikiLinkDirectory, WikiLinkInfo, WikiLinkState};
 
 /// Registers the editor's key bindings. Call once at startup, after `gpui_kit::init`.
 pub fn init(cx: &mut gpui::App) {

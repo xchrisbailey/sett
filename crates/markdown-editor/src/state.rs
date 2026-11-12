@@ -10,6 +10,7 @@ use gpui::{
     Window, actions,
 };
 
+use super::wiki_link::{DirectoryHandle, WikiChipPlugin, WikiLinkDirectory};
 use super::{
     command::{CommandError, EditorCommand},
     editor::BlockEditorModel,
@@ -417,6 +418,8 @@ pub struct BlockEditorState {
     /// The caret moved and should be scrolled into view after layout.
     pub(crate) reveal: std::cell::Cell<bool>,
     marked: Option<Marked>,
+    /// FORK: what the host knows about Links, shared with the chip plugin.
+    wiki_links: DirectoryHandle,
     /// An IME composition opened an undo group that is not committed yet.
     composition_open: bool,
     /// Remembered x for repeated up/down.
@@ -486,7 +489,12 @@ impl BlockEditorState {
                 }
             }),
         ];
-        let model = BlockEditorModel::from_markdown("", MarkdownExtensions::default())
+        // FORK: the Link chip plugin reads the directory through this handle.
+        let wiki_links = DirectoryHandle::default();
+        let extensions = MarkdownExtensions::default().plugin(WikiChipPlugin {
+            directory: wiki_links.clone(),
+        });
+        let model = BlockEditorModel::from_markdown("", extensions)
             .unwrap_or_else(|_| unreachable!("empty source always parses"));
         Self {
             model,
@@ -500,6 +508,7 @@ impl BlockEditorState {
             scroll_handle: Some(gpui::ScrollHandle::new()),
             reveal: Default::default(),
             marked: None,
+            wiki_links,
             composition_open: false,
             goal_x: None,
             dragging: false,
@@ -645,6 +654,46 @@ impl BlockEditorState {
         let _ = self.model.set_source(source);
         self.projection.invalidate();
         self
+    }
+
+    /// FORK: tells the editor which Item each Link points at, for the chips.
+    /// Links whose slug is missing draw as broken. No `Changed` event.
+    pub fn set_wiki_links(&mut self, directory: Arc<WikiLinkDirectory>, cx: &mut Context<Self>) {
+        let mut current = self
+            .wiki_links
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if *current == directory {
+            return;
+        }
+        *current = directory;
+        drop(current);
+        cx.notify();
+    }
+
+    /// FORK: the slug of every Link in the document that shows as a chip,
+    /// for the host to look up. The text of a Link is never changed to match.
+    pub fn wiki_link_slugs(&self) -> Vec<String> {
+        let doc = &self.model.doc;
+        let mut slugs: Vec<String> = doc
+            .leaves()
+            .iter()
+            .filter_map(|leaf| doc.inline(*leaf))
+            .flat_map(|inline| {
+                super::wiki_chip::chip_spans(inline)
+                    .into_iter()
+                    .map(|span| {
+                        let source = &inline.text()[span];
+                        super::wiki_chip::link_parts(&source[2..source.len() - 2])
+                            .slug
+                            .to_string()
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        slugs.sort();
+        slugs.dedup();
+        slugs
     }
 
     /// Replace the content. No `Changed` event; clears history.
@@ -904,7 +953,14 @@ impl BlockEditorState {
     pub(crate) fn snapshot(&mut self) -> Rc<Snapshot> {
         self.projection
             .set_placeholders(self.image_policy == super::ImagePolicy::Placeholder);
-        self.projection.snapshot(&self.model.doc)
+        // FORK: Links with a selection end inside, or being composed in, are
+        // shown as source.
+        let open = super::wiki_chip::OpenSpans::new(
+            &self.model.doc,
+            self.model.selection(),
+            self.marked_range(),
+        );
+        self.projection.snapshot(&self.model.doc, open)
     }
 
     /// Blocks that are always laid out: the selection ends, the IME

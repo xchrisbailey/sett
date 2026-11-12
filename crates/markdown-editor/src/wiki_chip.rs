@@ -7,7 +7,13 @@
 
 use std::ops::Range;
 
-use super::{inline::InlineText, markdown_source::wiki_link_spans};
+use gpui::SharedString;
+use gpui_kit::base::text::{MarkdownNode, editor_host::InlineNode};
+
+use super::{
+    document::EditorDocument, id::BlockId, inline::InlineText, markdown_source::wiki_link_spans,
+    selection::BlockSelection,
+};
 
 /// The three parts of a Link's inner text.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -55,6 +61,86 @@ pub(crate) fn chip_spans(inline: &InlineText) -> Vec<Range<usize>> {
     spans
 }
 
+/// What the plugin needs to draw one chip: the text between `[[` and `]]`.
+pub(crate) struct ChipData {
+    pub(crate) inner: SharedString,
+}
+
+/// The name of the chip's inline plugin.
+pub(crate) const CHIP_NODE: &str = "sett-wiki-chip";
+
+/// The chip object for the Link `source` (`[[slug]]`). Its fallback text and
+/// accessibility label are the source.
+pub(crate) fn chip_node(source: &str) -> InlineNode {
+    let inner = source
+        .strip_prefix("[[")
+        .and_then(|s| s.strip_suffix("]]"))
+        .unwrap_or(source);
+    InlineNode::custom(
+        MarkdownNode::new(
+            CHIP_NODE,
+            ChipData {
+                inner: inner.to_string().into(),
+            },
+        )
+        .text(source.to_string())
+        .accessibility_label(source.to_string()),
+    )
+}
+
+/// The Link spans shown as source: one that has a selection end strictly
+/// inside it, or that the IME is composing in. View state only; nothing in
+/// the document changes when it does.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct OpenSpans(Vec<(BlockId, Range<usize>)>);
+
+impl OpenSpans {
+    pub(crate) fn new(
+        doc: &EditorDocument,
+        selection: &BlockSelection,
+        marked: Option<(BlockId, Range<usize>)>,
+    ) -> Self {
+        let mut open: Vec<(BlockId, Range<usize>)> = Vec::new();
+        let mut add = |block: BlockId, hit: &dyn Fn(&Range<usize>) -> bool| {
+            let Some(inline) = doc.inline(block) else {
+                return;
+            };
+            if !inline.text().contains("[[") {
+                return;
+            }
+            for span in chip_spans(inline).into_iter().filter(|s| hit(s)) {
+                if !open.contains(&(block, span.clone())) {
+                    open.push((block, span));
+                }
+            }
+        };
+        if let BlockSelection::Text { anchor, head } = selection {
+            for end in [anchor, head] {
+                let at = end.offset;
+                add(end.block, &|s| s.start < at && at < s.end);
+            }
+        }
+        if let Some((block, range)) = marked {
+            add(block, &|s| s.start < range.end && range.start < s.end);
+        }
+        open.sort_by_key(|(block, span)| (block.as_u64(), span.start));
+        Self(open)
+    }
+
+    /// The open spans of `leaf`.
+    pub(crate) fn of(&self, leaf: BlockId) -> Vec<Range<usize>> {
+        self.0
+            .iter()
+            .filter(|(block, _)| *block == leaf)
+            .map(|(_, span)| span.clone())
+            .collect()
+    }
+
+    pub(crate) fn leaves(&self) -> impl Iterator<Item = BlockId> + '_ {
+        self.0.iter().map(|(block, _)| *block)
+    }
+}
+
 /// Bytes a closed chip takes in the renderer's text: one `U+FFFC`.
 pub(crate) const CHIP_LEN: usize = 3;
 
@@ -72,10 +158,6 @@ impl ChipMap {
     /// `spans` are model ranges, sorted and disjoint. `None` when empty.
     pub(crate) fn new(spans: Vec<Range<usize>>) -> Option<Self> {
         (!spans.is_empty()).then_some(Self { spans })
-    }
-
-    pub(crate) fn spans(&self) -> &[Range<usize>] {
-        &self.spans
     }
 
     /// Bytes the chips before the model offset `at` took off the renderer's text.
