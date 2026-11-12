@@ -148,12 +148,20 @@ impl ItemEditor {
                 .soft_wrap(true)
         });
         let subscriptions = vec![
-            cx.subscribe_in(&block, window, |this, block, event, window, cx| {
-                if let BlockEditorEvent::Changed { .. } = event {
-                    this.body = block.read(cx).source();
-                    this.edited(window, cx);
-                }
-            }),
+            cx.subscribe_in(
+                &block,
+                window,
+                |this, block, event, window, cx| match event {
+                    BlockEditorEvent::Changed { .. } => {
+                        this.body = block.read(cx).source();
+                        this.edited(window, cx);
+                    }
+                    BlockEditorEvent::CreateLinkTargetRequested { title } => {
+                        this.create_link_target(title, block, window, cx);
+                    }
+                    _ => {}
+                },
+            ),
             cx.subscribe_in(&raw, window, |this, raw, event: &InputEvent, window, cx| {
                 if let InputEvent::Change = event {
                     this.body = raw.read(cx).value().to_string();
@@ -414,6 +422,36 @@ impl ItemEditor {
         self.asking = false;
         self.autosave = None;
         cx.notify();
+    }
+
+    /// Creates the Note the Link Picker's last row offered, in the open
+    /// Item's Project (none for a Space-level Note or a Journal Entry), and
+    /// links to it. A failure is shown and leaves the typed text as it was.
+    fn create_link_target(
+        &mut self,
+        title: &str,
+        block: &Entity<BlockEditorState>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let project = match &self.item {
+            Some(ItemRef::Note { project, .. }) => project.clone(),
+            Some(ItemRef::Task { project, .. }) => Some(project.clone()),
+            Some(ItemRef::Journal { .. }) | None => None,
+        };
+        let created = self
+            .model
+            .update(cx, |w, cx| w.create_note(project.as_deref(), title, cx));
+        match created {
+            Ok(slug) => {
+                block.update(cx, |block, cx| block.complete_link_pick(&slug, cx));
+                self.refresh_link_candidates(cx);
+            }
+            Err(err) => window.push_notification(
+                Notification::error(format!("Couldn\u{2019}t create the Note. {err}.")),
+                cx,
+            ),
+        }
     }
 
     /// Gives the Link Picker the Space's Items, minus the open one.
