@@ -66,8 +66,8 @@ mod kind;
 // FORK: the Link Picker.
 mod link_picker;
 mod markdown_source;
-// FORK: Links drawn as title chips.
 mod marks;
+// FORK: Links drawn as title chips.
 mod wiki_chip;
 mod wiki_link;
 // FORK: what the Insert Menu and the Callout type menu share.

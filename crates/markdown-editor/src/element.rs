@@ -370,6 +370,7 @@ impl RenderOnce for BlockEditor {
             } else if self.state.read(cx).pointer_hand {
                 CursorStyle::PointingHand
             } else if self.state.read(cx).pointer_arrow {
+                // FORK: an arrow over a broken Link chip.
                 CursorStyle::Arrow
             } else {
                 CursorStyle::IBeam
@@ -942,6 +943,7 @@ impl Element for EditorRoot {
             if phase == DispatchPhase::Bubble {
                 entity.update(cx, |state, cx| {
                     state.dragging = false;
+                    // FORK: a plain click on a Link chip opens it.
                     state.release_chip(cx);
                     state.finish_block_drag(cx);
                 });

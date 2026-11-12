@@ -28,6 +28,7 @@ pub(crate) struct ProjectedBlock {
 }
 
 /// Geometry facts the frame needs about a caret leaf.
+// FORK: no longer `Copy`, as it holds the chip map.
 #[derive(Clone, Debug)]
 pub(crate) struct LeafInfo {
     pub(crate) block: BlockId,
@@ -61,9 +62,10 @@ pub(crate) struct ProjectionCache {
 }
 
 impl ProjectionCache {
-    /// `open` holds the Link spans shown as source. A change of it rebuilds
-    /// the old and new leaves although the document did not change.
+    /// FORK: `open` holds the Link spans shown as source. A change of it
+    /// rebuilds the old and new leaves although the document did not change.
     pub(crate) fn snapshot(&mut self, doc: &EditorDocument, open: OpenSpans) -> Rc<Snapshot> {
+        // FORK: leaves whose open spans changed are rebuilt.
         let dirty = self.nodes.set_open(doc, open);
         if !dirty.is_empty() {
             for id in dirty {
@@ -95,6 +97,7 @@ impl ProjectionCache {
         let leaves: Vec<LeafInfo> = doc
             .leaves()
             .iter()
+            // FORK: the open spans decide which Links are chips.
             .filter_map(|id| leaf_info(doc, *id, &self.nodes.open_of(*id)))
             .collect();
         let mut tables: Vec<(BlockId, Vec<BlockId>)> = Vec::new();
@@ -154,6 +157,7 @@ impl ProjectionCache {
 fn leaf_info(
     doc: &EditorDocument,
     id: BlockId,
+    // FORK: the leaf's open Link spans.
     open: &[std::ops::Range<usize>],
 ) -> Option<LeafInfo> {
     let entry = doc.get(id)?;
