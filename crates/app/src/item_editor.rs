@@ -152,11 +152,17 @@ impl ItemEditor {
         });
         let subscriptions = vec![
             cx.subscribe_in(&block, window, |this, block, event, window, cx| {
-                if let BlockEditorEvent::Changed { .. } = event {
-                    this.body = block.read(cx).source();
-                    // A Link may have been typed or deleted.
-                    this.refresh_links(cx);
-                    this.edited(window, cx);
+                match event {
+                    BlockEditorEvent::Changed { .. } => {
+                        this.body = block.read(cx).source();
+                        // A Link may have been typed or deleted.
+                        this.refresh_links(cx);
+                        this.edited(window, cx);
+                    }
+                    BlockEditorEvent::WikiLinkClicked { slug, heading } => {
+                        this.follow_link(slug, heading.as_deref(), window, cx);
+                    }
+                    _ => {}
                 }
             }),
             cx.subscribe_in(&raw, window, |this, raw, event: &InputEvent, window, cx| {
@@ -216,6 +222,7 @@ impl ItemEditor {
     /// Entry without a file opens empty and stays in memory until typed in.
     pub(crate) fn open(&mut self, item: ItemRef, window: &mut Window, cx: &mut Context<Self>) {
         if self.item.as_ref() == Some(&item) {
+            self.apply_reveal(window, cx);
             return;
         }
         self.flush(window, cx);
@@ -226,6 +233,57 @@ impl ItemEditor {
             Some(base) => self.show(disk, base, window, cx),
             None => self.close(cx),
         }
+        self.apply_reveal(window, cx);
+    }
+
+    /// Follows a Link chip in the body: opens the Item its slug names (a
+    /// broken Link does nothing), then goes to `heading` if it has one. A
+    /// Link to the open Item only goes to the heading.
+    fn follow_link(
+        &mut self,
+        slug: &str,
+        heading: Option<&str>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let LinkTarget::Found { item, .. } = self.model.read(cx).index().resolve(slug) else {
+            return;
+        };
+        if self.item.as_ref().map(ItemRef::id) == Some(item.clone()) {
+            if let Some(heading) = heading {
+                self.reveal_heading(heading, window, cx);
+            }
+            return;
+        }
+        // The views save what they hide, but write it now so the file is
+        // current whichever view takes over.
+        self.flush(window, cx);
+        let heading = heading.map(str::to_string);
+        self.model
+            .update(cx, |model, cx| model.open_item_at(item, heading, cx));
+    }
+
+    /// Goes to the heading a followed Link asked for in the Item just opened.
+    fn apply_reveal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(item) = self.item.as_ref().map(ItemRef::id) else {
+            return;
+        };
+        if let Some(heading) = self.model.update(cx, |model, _| model.take_reveal(&item)) {
+            self.reveal_heading(&heading, window, cx);
+        }
+    }
+
+    /// Puts the caret at the start of the first heading called `heading` and
+    /// scrolls to it. Without a match the caret and scroll stay where they are.
+    fn reveal_heading(&mut self, heading: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if self.mode != EditorMode::Block {
+            return;
+        }
+        self.block.update(cx, |block, cx| {
+            if block.reveal_heading(heading, cx) {
+                block.focus(window, cx);
+            }
+        });
     }
 
     /// Focuses the title with its text selected, for a Note just created.

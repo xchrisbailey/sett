@@ -67,7 +67,7 @@ pub(crate) fn paragraph(
                                 .marks(vec![(0..source.len(), mark)]),
                         );
                     } else {
-                        let chip = super::wiki_chip::chip_node(source);
+                        let chip = super::wiki_chip::chip_node(source, (id.as_u64(), span.start));
                         let len = chip.text().len();
                         paragraph.push(chip.marks(vec![(0..len, mark.clone())]));
                     }

@@ -10,7 +10,9 @@ use gpui::{
     Window, actions,
 };
 
-use super::wiki_link::{DirectoryHandle, WikiChipPlugin, WikiLinkDirectory};
+use super::wiki_link::{
+    DirectoryHandle, HoverHandle, WikiChipPlugin, WikiLinkDirectory, WikiLinkState,
+};
 use super::{
     command::{CommandError, EditorCommand},
     editor::BlockEditorModel,
@@ -349,6 +351,13 @@ pub enum BlockEditorEvent {
     LinkHovered {
         url: Option<SharedString>,
     },
+    /// FORK: Cmd/Ctrl+click on a Link chip (`[[slug#heading]]`). The host
+    /// decides what it points at and whether to open it; the editor doesn't
+    /// move the caret.
+    WikiLinkClicked {
+        slug: SharedString,
+        heading: Option<SharedString>,
+    },
     Focus,
     Blur,
     /// Enter requested submission; emitted only outside IME composition. The
@@ -435,6 +444,8 @@ pub struct BlockEditorState {
     marked: Option<Marked>,
     /// FORK: what the host knows about Links, shared with the chip plugin.
     wiki_links: DirectoryHandle,
+    /// FORK: the chip under the pointer while Cmd/Ctrl is held.
+    wiki_hover: HoverHandle,
     /// An IME composition opened an undo group that is not committed yet.
     composition_open: bool,
     /// Remembered x for repeated up/down.
@@ -455,6 +466,8 @@ pub struct BlockEditorState {
     hovered_link: Option<SharedString>,
     /// The mouse is over a task checkbox, or a link with Cmd/Ctrl held.
     pub(crate) pointer_hand: bool,
+    /// FORK: Cmd/Ctrl is held over a broken Link chip.
+    pub(crate) pointer_arrow: bool,
     /// The open table grip menu (D20).
     pub(crate) table_menu: Option<super::table_ui::TableMenu>,
     /// FORK: the open Insert Menu, and the options it offers.
@@ -512,8 +525,10 @@ impl BlockEditorState {
         ];
         // FORK: the Link chip plugin reads the directory through this handle.
         let wiki_links = DirectoryHandle::default();
+        let wiki_hover = HoverHandle::default();
         let extensions = MarkdownExtensions::default().plugin(WikiChipPlugin {
             directory: wiki_links.clone(),
+            hover: wiki_hover.clone(),
         });
         let model = BlockEditorModel::from_markdown("", extensions)
             .unwrap_or_else(|_| unreachable!("empty source always parses"));
@@ -530,6 +545,7 @@ impl BlockEditorState {
             reveal: Default::default(),
             marked: None,
             wiki_links,
+            wiki_hover,
             composition_open: false,
             goal_x: None,
             dragging: false,
@@ -545,6 +561,7 @@ impl BlockEditorState {
             input_rule_filter: None,
             hovered_link: None,
             pointer_hand: false,
+            pointer_arrow: false,
             table_menu: None,
             // FORK
             insert_menu: None,
@@ -1668,9 +1685,39 @@ impl BlockEditorState {
     pub(crate) fn hover_at(&mut self, at: Point<Pixels>, secondary: bool, cx: &mut Context<Self>) {
         self.hover_table(at, cx);
         let url = self.link_at(at).map(|(_, _, url)| url);
-        let hand = self.task_checkbox_at(at).is_some() || (secondary && url.is_some());
+        // FORK: a Link chip under the pointer with Cmd/Ctrl held. A working
+        // or ambiguous one darkens, underlines and shows a hand; a broken one
+        // shows an arrow and a tooltip.
+        let chip = secondary.then(|| self.wiki_chip_at(at)).flatten();
+        let chip_key = chip
+            .as_ref()
+            .map(|chip| (chip.block.as_u64(), chip.span.start));
+        let followable = chip.as_ref().is_some_and(|chip| {
+            self.wiki_links
+                .read()
+                .ok()
+                .and_then(|dir| dir.get(&chip.slug).map(|info| info.state))
+                .is_some_and(|state| state != WikiLinkState::Broken)
+        });
+        {
+            let mut hover = self
+                .wiki_hover
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if *hover != chip_key {
+                *hover = chip_key;
+                cx.notify();
+            }
+        }
+        let hand =
+            self.task_checkbox_at(at).is_some() || (secondary && url.is_some()) || followable;
         if hand != self.pointer_hand {
             self.pointer_hand = hand;
+            cx.notify();
+        }
+        let arrow = chip.is_some() && !followable;
+        if arrow != self.pointer_arrow {
+            self.pointer_arrow = arrow;
             cx.notify();
         }
         if url != self.hovered_link {
@@ -1690,6 +1737,65 @@ impl BlockEditorState {
             }
             None => false,
         }
+    }
+
+    /// FORK: the Link chip drawn under the window point `at`.
+    fn wiki_chip_at(&self, at: Point<Pixels>) -> Option<super::wiki_chip::WikiChipHit> {
+        let (block, span) = {
+            let frame = self.frame.borrow();
+            let pos = frame.hit_test(at)?;
+            let leaf = frame.leaf(pos.block)?;
+            if !leaf.bounds().contains(&at) {
+                return None;
+            }
+            (pos.block, leaf.chip_at(at)?)
+        };
+        let source = self.model.doc.inline(block)?.text().get(span.clone())?;
+        let inner = source.strip_prefix("[[")?.strip_suffix("]]")?;
+        let parts = super::wiki_chip::link_parts(inner);
+        Some(super::wiki_chip::WikiChipHit {
+            block,
+            span,
+            slug: parts.slug.to_string(),
+            heading: parts.heading.map(|h| h.to_string().into()),
+        })
+    }
+
+    /// FORK: Cmd/Ctrl+click: emit [`BlockEditorEvent::WikiLinkClicked`] for
+    /// the Link chip under `at`. Returns whether there was one.
+    pub(crate) fn follow_wiki_link_at(
+        &mut self,
+        at: Point<Pixels>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        match self.wiki_chip_at(at) {
+            Some(chip) => {
+                cx.emit(BlockEditorEvent::WikiLinkClicked {
+                    slug: chip.slug.into(),
+                    heading: chip.heading,
+                });
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// FORK: puts the caret at the start of the first heading whose text is
+    /// `text`, ignoring case, and scrolls it into view. Returns whether one
+    /// was found.
+    pub fn reveal_heading(&mut self, text: &str, cx: &mut Context<Self>) -> bool {
+        let Some(position) = super::wiki_chip::heading_position(&self.model.doc, text) else {
+            return false;
+        };
+        if self
+            .model
+            .set_selection(BlockSelection::caret(position))
+            .is_err()
+        {
+            return false;
+        }
+        self.selection_changed(cx);
+        true
     }
 
     /// The url of the link at the caret (or the selection start).

@@ -138,3 +138,17 @@ fn opening_a_cell_link_rebuilds_the_table() {
             .any(|(_, m)| m.code)
     );
 }
+
+#[test]
+fn a_heading_is_found_by_its_text_ignoring_case() {
+    let model = model("intro\n\n# Overview\n\n## Quotes\n\ntext\n\n## quotes again\n");
+    let doc = model.doc();
+    let leaf = |ix: usize| doc.leaves().get(ix).copied().unwrap();
+    let found = crate::wiki_chip::heading_position(doc, "QUOTES");
+    assert_eq!(found, Some(BlockPosition::new(leaf(2), 0)));
+    let found = crate::wiki_chip::heading_position(doc, " overview ");
+    assert_eq!(found, Some(BlockPosition::new(leaf(1), 0)));
+    // Only whole headings match, and body text is not a heading.
+    assert_eq!(crate::wiki_chip::heading_position(doc, "Quote"), None);
+    assert_eq!(crate::wiki_chip::heading_position(doc, "intro"), None);
+}

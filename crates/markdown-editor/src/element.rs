@@ -369,10 +369,22 @@ impl RenderOnce for BlockEditor {
                 CursorStyle::OpenHand
             } else if self.state.read(cx).pointer_hand {
                 CursorStyle::PointingHand
+            } else if self.state.read(cx).pointer_arrow {
+                CursorStyle::Arrow
             } else {
                 CursorStyle::IBeam
             })
             .w_full()
+            // FORK: pressing or releasing Cmd/Ctrl over a Link chip changes
+            // how it looks without the pointer moving.
+            .on_modifiers_changed({
+                let state = self.state.clone();
+                move |event, window, cx| {
+                    let at = window.mouse_position();
+                    let held = secondary_modifier().is_subset_of(&event.modifiers);
+                    state.update(cx, |state, cx| state.hover_at(at, held, cx));
+                }
+            })
             .on_action(window.listener_for(s, BlockEditorState::on_backspace))
             .on_action(window.listener_for(s, BlockEditorState::on_delete))
             .on_action(window.listener_for(s, BlockEditorState::on_delete_word_left))
@@ -873,7 +885,9 @@ impl Element for EditorRoot {
                 let focus = state.focus_handle.clone();
                 window.focus(&focus, cx);
                 if secondary_modifier().is_subset_of(&event.modifiers)
-                    && state.follow_link_at(event.position, cx)
+                    && (state.follow_link_at(event.position, cx)
+                        // FORK: a Link chip follows too.
+                        || state.follow_wiki_link_at(event.position, cx))
                 {
                     return;
                 }

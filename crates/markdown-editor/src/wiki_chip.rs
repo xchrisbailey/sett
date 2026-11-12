@@ -11,8 +11,8 @@ use gpui::SharedString;
 use gpui_kit::base::text::{MarkdownNode, editor_host::InlineNode};
 
 use super::{
-    document::EditorDocument, id::BlockId, inline::InlineText, markdown_source::wiki_link_spans,
-    selection::BlockSelection,
+    document::EditorDocument, id::BlockId, inline::InlineText, kind::BlockKindData,
+    markdown_source::wiki_link_spans, position::BlockPosition, selection::BlockSelection,
 };
 
 /// The three parts of a Link's inner text.
@@ -64,14 +64,19 @@ pub(crate) fn chip_spans(inline: &InlineText) -> Vec<Range<usize>> {
 /// What the plugin needs to draw one chip: the text between `[[` and `]]`.
 pub(crate) struct ChipData {
     pub(crate) inner: SharedString,
+    /// Which chip this is, to match the one Cmd-hover is over.
+    pub(crate) key: ChipKey,
 }
+
+/// A chip's leaf (`BlockId::as_u64`) and the start of its span in the model.
+pub(crate) type ChipKey = (u64, usize);
 
 /// The name of the chip's inline plugin.
 pub(crate) const CHIP_NODE: &str = "sett-wiki-chip";
 
 /// The chip object for the Link `source` (`[[slug]]`). Its fallback text and
 /// accessibility label are the source.
-pub(crate) fn chip_node(source: &str) -> InlineNode {
+pub(crate) fn chip_node(source: &str, key: ChipKey) -> InlineNode {
     let inner = source
         .strip_prefix("[[")
         .and_then(|s| s.strip_suffix("]]"))
@@ -81,11 +86,37 @@ pub(crate) fn chip_node(source: &str) -> InlineNode {
             CHIP_NODE,
             ChipData {
                 inner: inner.to_string().into(),
+                key,
             },
         )
         .text(source.to_string())
         .accessibility_label(source.to_string()),
     )
+}
+
+/// The Link chip under the pointer, for Cmd/Ctrl-click and hover.
+pub(crate) struct WikiChipHit {
+    pub(crate) block: BlockId,
+    /// The `[[…]]` span in the leaf's model offsets.
+    pub(crate) span: Range<usize>,
+    pub(crate) slug: String,
+    pub(crate) heading: Option<SharedString>,
+}
+
+/// The start of the first heading whose text is `text`, ignoring case and
+/// surrounding space.
+pub(crate) fn heading_position(doc: &EditorDocument, text: &str) -> Option<BlockPosition> {
+    let wanted = text.trim().to_lowercase();
+    doc.leaves()
+        .iter()
+        .copied()
+        .find(|leaf| {
+            matches!(doc.kind(*leaf), Some(BlockKindData::Heading { .. }))
+                && doc
+                    .inline(*leaf)
+                    .is_some_and(|inline| inline.text().trim().to_lowercase() == wanted)
+        })
+        .map(|leaf| BlockPosition::new(leaf, 0))
 }
 
 /// The Link spans shown as source: one that has a selection end strictly
