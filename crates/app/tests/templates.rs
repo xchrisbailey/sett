@@ -201,3 +201,62 @@ fn a_file_added_on_disk_appears_in_the_list(cx: &mut TestAppContext) {
     write_template(cx, &f, "adr", "ADR");
     assert_eq!(listed(cx, &f), ["ADR", "Bug"]);
 }
+
+#[gpui_kit::test]
+fn an_open_template_lists_its_own_links_but_nothing_links_to_it(cx: &mut TestAppContext) {
+    let f = open_shell(cx);
+    common::write(
+        cx,
+        &f,
+        "notes/plan.md",
+        "---\ntitle: Plan\n---\nSee [[standup]]\n",
+        common::note(None, "plan"),
+    );
+    let path = write_template(cx, &f, "standup", "Standup");
+    fs::write(
+        &path,
+        "---\ntitle: Standup\n---\n[[plan]] and [[nowhere]]\n",
+    )
+    .unwrap();
+    let model = f.model(cx);
+    cx.update(|cx| model.update(cx, |w, cx| w.apply_change(template_change("standup"), cx)));
+    show_templates(cx, &f);
+    open_template(cx, &f, "standup");
+
+    // The chips in the body carry the same names, so look only in the panel.
+    let (broken, found, linked_from) = cx
+        .update_window(f.window, |_, window, cx| {
+            window.render_frame(cx);
+            let panel = window.within("item-links");
+            (
+                panel.try_find_by_label("nowhere (not found)").is_some(),
+                panel.try_find_by_label("Plan").is_some(),
+                panel.try_find_by_label("Linked from").is_some(),
+            )
+        })
+        .unwrap();
+    assert!(broken && found);
+    // The Note's `[[standup]]` doesn't name an Item, so nothing is linked from.
+    assert!(!linked_from);
+}
+
+#[gpui_kit::test]
+fn renaming_a_template_works_in_the_templates_own_space(cx: &mut TestAppContext) {
+    let f = open_shell(cx);
+    let work = f.data_root.join("work/templates");
+    fs::create_dir_all(&work).unwrap();
+    fs::write(work.join("old.md"), "---\ntitle: Old\n---\n").unwrap();
+    let model = f.model(cx);
+
+    // The active Space is Personal.
+    let slug = cx
+        .update(|cx| {
+            model.update(cx, |w, _| {
+                w.rename_template(sett_store::Space::Work, "old", "New")
+            })
+        })
+        .unwrap();
+
+    assert_eq!(slug, "new");
+    assert!(work.join("new.md").exists() && !work.join("old.md").exists());
+}

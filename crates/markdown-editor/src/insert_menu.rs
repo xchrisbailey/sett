@@ -81,10 +81,6 @@ impl InsertMenuOption {
         self
     }
 
-    pub fn section_label(&self) -> Option<&SharedString> {
-        self.section.as_ref()
-    }
-
     /// Extra words the filter matches, besides the label.
     pub fn aliases(mut self, aliases: impl IntoIterator<Item = impl Into<SharedString>>) -> Self {
         self.aliases = aliases.into_iter().map(Into::into).collect();
@@ -256,11 +252,7 @@ impl BlockEditorState {
     /// Replace the options the menu offers. An open menu keeps its current
     /// rows (a row can't change under the user's arrow keys); the new
     /// options apply the next time it opens.
-    pub fn set_insert_menu_options(
-        &mut self,
-        options: impl IntoIterator<Item = InsertMenuOption>,
-        _cx: &mut Context<Self>,
-    ) {
+    pub fn set_insert_menu_options(&mut self, options: impl IntoIterator<Item = InsertMenuOption>) {
         let options: Vec<_> = options.into_iter().collect();
         if self.insert_menu.is_some() {
             self.pending_insert_menu_options = Some(options);
@@ -374,7 +366,11 @@ pub(crate) fn render(
     cx: &gpui::App,
 ) -> Option<gpui::AnyElement> {
     use gpui::prelude::FluentBuilder as _;
-    use gpui::{IntoElement as _, ParentElement as _, Styled as _, div};
+    use gpui::{
+        InteractiveElement as _, IntoElement as _, ParentElement as _,
+        StatefulInteractiveElement as _, Styled as _, div,
+    };
+    use gpui_kit::base::TestSupportExt as _;
     use gpui_kit::component::ActiveTheme as _;
 
     let s = state.read(cx);
@@ -390,6 +386,10 @@ pub(crate) fn render(
         .into_iter()
         .map(|row| match row {
             Row::Header { label, divider } => div()
+                .id(SharedString::from(format!("insert-menu-section-{label}")))
+                .role(gpui::Role::Group)
+                .test_support()
+                .aria_label(label.clone())
                 .when(divider, |this| {
                     this.mt_1().pt_1().border_t_1().border_color(theme.border)
                 })

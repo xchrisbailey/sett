@@ -296,19 +296,59 @@ fn picking_a_template_replaces_the_slash_with_its_body(cx: &mut TestAppContext) 
     assert!(has_label(cx, &f, "Standup") && !has_label(cx, &f, "Retro"));
     press(cx, &f, "enter");
     assert!(!menu_open(cx, &f));
-    let saved = fs::read_to_string({
-        cx.executor().advance_clock(AFTER_AUTOSAVE);
-        cx.run_until_parked();
-        &path
-    })
-    .unwrap();
     assert_eq!(
-        saved,
-        "---\ntitle: Plan\n---\nFirst line\n\n## Yesterday\n\nDone\n"
+        saved_body(cx, &path),
+        "First line\n\n## Yesterday\n\nDone\n"
     );
     // One undo restores the typed text.
     press(cx, &f, "secondary-z");
     assert_eq!(saved_body(cx, &path), "First line\n\n/stand\n");
+}
+
+/// Only the body comes from a Template: the Task's own fields and any other
+/// frontmatter key stay as they were, and the Template's keys don't arrive.
+#[gpui_kit::test]
+fn inserting_a_template_into_a_task_keeps_its_column_and_due_date(cx: &mut TestAppContext) {
+    let f = open_shell(cx);
+    let tasks = f.data_root.join("personal/projects/inbox/tasks");
+    fs::create_dir_all(&tasks).unwrap();
+    let path = tasks.join("ship.md");
+    fs::write(
+        &path,
+        "---\ntitle: Ship\ncolumn: Doing\norder: 1\ncreated: 2026-01-02\ndue: 2026-03-04\n---\n",
+    )
+    .unwrap();
+    let model = f.model(cx);
+    cx.update(|cx| {
+        model.update(cx, |w, cx| {
+            w.apply_change(Change::Project("inbox".into()), cx);
+            w.select(Selection::Project("inbox".into()), cx);
+        })
+    });
+    add_template(cx, &f, "standup", "Standup", "## Yesterday\n\nDone\n");
+    cx.update_window(f.window, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("card-ship", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(f.window, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("note-body", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    input(cx, &f, "/stand");
+    press(cx, &f, "enter");
+
+    cx.executor().advance_clock(AFTER_AUTOSAVE);
+    cx.run_until_parked();
+    let saved = fs::read_to_string(&path).unwrap();
+    assert!(saved.contains("column: Doing"), "{saved}");
+    assert!(saved.contains("due: 2026-03-04"), "{saved}");
+    assert!(saved.contains("## Yesterday\n\nDone"), "{saved}");
+    assert!(!saved.contains("mood"), "{saved}");
 }
 
 #[gpui_kit::test]
@@ -318,11 +358,12 @@ fn a_template_added_on_disk_shows_the_next_time_the_menu_opens(cx: &mut TestAppC
     assert!(menu_open(cx, &f));
     // Only the block types: nothing to pick after Divider.
     assert!(has_label(cx, &f, "Divider") && !has_label(cx, &f, "Standup"));
+    assert!(!has_label(cx, &f, "Templates"));
     press(cx, &f, "escape backspace");
 
     add_template(cx, &f, "standup", "Standup", "Body\n");
     input(cx, &f, "/");
-    assert!(has_label(cx, &f, "Standup"));
+    assert!(has_label(cx, &f, "Standup") && has_label(cx, &f, "Templates"));
 }
 
 #[gpui_kit::test]

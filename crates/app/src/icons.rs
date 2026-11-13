@@ -206,7 +206,6 @@ project_icons![
 
 gpui_kit::assets::icon_assets!(NavIconAssets, [LayoutTemplate]);
 
-/// The Templates entry in the nav.
 pub(crate) const TEMPLATES_ICON: IconName = IconName::LayoutTemplate;
 
 /// What a Project shows when it has no icon, or one outside the curated set.

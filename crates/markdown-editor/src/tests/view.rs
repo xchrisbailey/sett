@@ -4391,7 +4391,7 @@ fn open_with_options(
     options: Vec<crate::InsertMenuOption>,
 ) -> (Entity<BlockEditorState>, &mut VisualTestContext) {
     let (editor, cx) = open(cx, "");
-    editor.update(cx, |e, cx| e.set_insert_menu_options(options, cx));
+    editor.update(cx, |e, _| e.set_insert_menu_options(options));
     (editor, cx)
 }
 
@@ -4444,9 +4444,7 @@ fn options_set_while_open_apply_on_reopen(cx: &mut TestAppContext) {
         menu_labels(&editor, cx),
         ["Quote", "Template 0", "Template 1"]
     );
-    editor.update(cx, |e, cx| {
-        e.set_insert_menu_options(template_options(1), cx)
-    });
+    editor.update(cx, |e, _| e.set_insert_menu_options(template_options(1)));
     draw(cx);
     assert_eq!(
         menu_labels(&editor, cx),

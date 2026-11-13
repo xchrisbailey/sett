@@ -126,7 +126,6 @@ impl AppModel {
         &self.index
     }
 
-    /// The active Space's Templates, sorted by title.
     pub fn templates(&self) -> &[Template] {
         &self.templates
     }
@@ -422,7 +421,6 @@ impl AppModel {
         Ok(())
     }
 
-    /// Creates an empty Template in the active Space. Returns its slug.
     pub fn create_template(&mut self, title: &str, cx: &mut Context<Self>) -> io::Result<String> {
         let template = self.store.create_template(self.space(), title)?;
         self.apply_change(Change::Template(template.slug.clone()), cx);
@@ -448,16 +446,14 @@ impl AppModel {
     ///
     /// Doesn't notify, so that the editor open on the Template can follow it
     /// to the new slug first; the caller notifies afterwards.
-    pub fn rename_template(&mut self, slug: &str, title: &str) -> io::Result<String> {
-        let new_slug = self.store.rename_template(self.space(), slug, title)?;
-        if new_slug != slug {
-            self.reload_templates(&Change::Template(slug.to_string()));
-            self.reload_templates(&Change::Template(new_slug.clone()));
+    pub fn rename_template(&mut self, space: Space, slug: &str, title: &str) -> io::Result<String> {
+        let new_slug = self.store.rename_template(space, slug, title)?;
+        if new_slug != slug && space == self.space() {
+            self.reload_templates();
         }
         Ok(new_slug)
     }
 
-    /// Moves a Template of the active Space to the Trash.
     pub fn trash_template(&mut self, slug: &str, cx: &mut Context<Self>) -> io::Result<()> {
         let template = self.template(slug).cloned().ok_or_else(|| {
             io::Error::new(
@@ -473,7 +469,7 @@ impl AppModel {
     /// Brings the active Space's index in line with an outside change to it.
     pub fn apply_change(&mut self, change: Change, cx: &mut Context<Self>) {
         if matches!(change, Change::Template(_) | Change::Templates) {
-            if self.reload_templates(&change) {
+            if self.reload_templates() {
                 cx.notify();
             }
             return;
@@ -484,19 +480,10 @@ impl AppModel {
         }
     }
 
-    /// Re-reads the Templates `change` covers. Returns whether any differ.
-    fn reload_templates(&mut self, change: &Change) -> bool {
-        let space = self.space();
-        let fresh = match change {
-            Change::Template(slug) => {
-                let mut all = self.templates.clone();
-                all.retain(|t| &t.slug != slug);
-                all.extend(self.store.template(space, slug));
-                all.sort_by_cached_key(|t| (t.title.to_lowercase(), t.slug.clone()));
-                all
-            }
-            _ => self.store.templates(space),
-        };
+    /// Re-reads the active Space's Templates, which come back sorted. Returns
+    /// whether any differ.
+    fn reload_templates(&mut self) -> bool {
+        let fresh = self.store.templates(self.space());
         let changed = fresh != self.templates;
         self.templates = fresh;
         changed

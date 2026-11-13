@@ -1011,7 +1011,7 @@ fn insert_markdown_is_refused_below_the_top_level() {
     for source in ["- item", "> quoted", "> [!NOTE]\n> inside"] {
         let mut m = model(source);
         caret_at_end(&mut m, 0);
-        assert!(!m.can_insert_markdown(), "{source}");
+        assert!(!m.can_insert_callout(), "{source}");
         assert!(
             m.run(EditorCommand::InsertMarkdown("# Hi\n\ntext".into()))
                 .is_err(),

@@ -264,6 +264,12 @@ impl SpaceIndex {
         self.links.links(item)
     }
 
+    /// The Links in `body`, which belongs to no Item (a Template's), as they
+    /// would resolve in this Space.
+    pub fn links_in(&self, body: &str) -> Vec<Link> {
+        self.links.links_in(body)
+    }
+
     /// The Items whose Links resolve to `item`. An Item that only shares a
     /// duplicated slug but isn't the one it resolves to has none.
     pub fn inbound_links(&self, item: &ItemId) -> Vec<InboundLink> {

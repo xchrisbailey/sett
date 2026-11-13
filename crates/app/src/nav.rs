@@ -9,8 +9,9 @@ use crate::app_model::{AppModel, Selection};
 use crate::icons::{TEMPLATES_ICON, project_icon};
 use crate::project_dialog;
 
-/// The left nav for the active Space: Journal, Notes and Templates, then the Projects
-/// (Inbox first), then archived Projects in a folded group at the bottom.
+/// The left nav for the active Space: Journal, Notes and Templates, then the
+/// Projects (Inbox first), then archived Projects in a folded group at the
+/// bottom.
 #[derive(IntoElement)]
 pub(crate) struct Nav {
     model: Entity<AppModel>,

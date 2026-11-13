@@ -16,12 +16,29 @@ use crate::item_editor::ItemRef;
 #[derive(IntoElement)]
 pub(crate) struct ItemLinks {
     model: Entity<AppModel>,
-    item: ItemId,
+    source: Source,
+}
+
+enum Source {
+    Item(ItemId),
+    /// A Template's body, as typed. Nothing links to a Template, so only its
+    /// own Links show.
+    Template(String),
 }
 
 impl ItemLinks {
     pub(crate) fn new(model: Entity<AppModel>, item: ItemId) -> Self {
-        ItemLinks { model, item }
+        ItemLinks {
+            model,
+            source: Source::Item(item),
+        }
+    }
+
+    pub(crate) fn for_template(model: Entity<AppModel>, body: String) -> Self {
+        ItemLinks {
+            model,
+            source: Source::Template(body),
+        }
     }
 }
 
@@ -39,16 +56,22 @@ enum Row {
 impl RenderOnce for ItemLinks {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let index = self.model.read(cx).index();
-        let inbound_links: Vec<Row> = index
-            .inbound_links(&self.item)
+        let (inbound, outgoing) = match &self.source {
+            Source::Item(item) => (index.inbound_links(item), index.links(item)),
+            Source::Template(body) => (Vec::new(), index.links_in(body)),
+        };
+        let own = match &self.source {
+            Source::Item(item) => Some(item),
+            Source::Template(_) => None,
+        };
+        let inbound_links: Vec<Row> = inbound
             .into_iter()
             .map(|b| item_row(index, b.source, b.ambiguous))
             .collect();
-        let links: Vec<Row> = index
-            .links(&self.item)
+        let links: Vec<Row> = outgoing
             .into_iter()
             .filter_map(|link| match link.target {
-                LinkTarget::Found { item, .. } if item == self.item => None,
+                LinkTarget::Found { item, .. } if Some(&item) == own => None,
                 LinkTarget::Found { item, ambiguous } => Some(item_row(index, item, ambiguous)),
                 LinkTarget::Broken => Some(Row::Broken(link.slug.into())),
             })
@@ -203,9 +226,8 @@ fn key(item: &ItemId) -> String {
 }
 
 impl ItemRef {
-    /// The Item being edited, or `None` for a Template.
-    pub(crate) fn id(&self) -> Option<ItemId> {
-        Some(match self {
+    pub(crate) fn id(&self) -> ItemId {
+        match self {
             ItemRef::Note { project, slug, .. } => ItemId::Note {
                 project: project.clone(),
                 slug: slug.clone(),
@@ -215,7 +237,6 @@ impl ItemRef {
                 project: project.clone(),
                 slug: slug.clone(),
             },
-            ItemRef::Template { .. } => return None,
-        })
+        }
     }
 }

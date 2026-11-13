@@ -12,7 +12,7 @@ use sett_store::{ItemId, Space};
 use crate::app_model::{AppModel, AppModelEvent, Selection};
 use crate::board::{BoardEvent, BoardView};
 use crate::dates::today;
-use crate::item_editor::{ItemEditor, ItemRef};
+use crate::item_editor::{ItemEditor, ItemRef, UNTITLED_TEMPLATE};
 use crate::notes::{NotesScope, NotesView};
 use crate::notice::frontmatter_notice;
 use crate::task_view::{TaskView, TaskViewEvent};
@@ -272,7 +272,7 @@ impl CenterPanel {
         let templates = self.templates.downgrade();
         // An untitled editor box still names the file it is editing.
         let title = if title.trim().is_empty() {
-            SharedString::from("Untitled template")
+            SharedString::from(UNTITLED_TEMPLATE)
         } else {
             title
         };

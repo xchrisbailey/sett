@@ -12,13 +12,13 @@ use gpui_kit::{
     AnyElement, App, AppContext as _, Context, ElementId, Entity, FocusHandle,
     InteractiveElement as _, IntoElement, KeyBinding, ParentElement as _, Render, Role,
     SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, TestSupportExt as _,
-    Window, actions, div, prelude::FluentBuilder as _,
+    Window, actions, div, prelude::FluentBuilder as _, rems,
 };
 use sett_store::Template;
 
 use crate::app_model::AppModel;
 use crate::confirm_delete::{TEMPLATE_CONSEQUENCE, confirm_delete};
-use crate::item_editor::{ItemEditor, ItemRef};
+use crate::item_editor::{EditorTarget, ItemEditor, UNTITLED_TEMPLATE};
 
 actions!(sett, [OpenTemplate]);
 
@@ -26,9 +26,6 @@ const ROW_CONTEXT: &str = "TemplateRow";
 
 const EMPTY_TEXT: &str =
     "Templates are starter bodies for Tasks and Notes. Type / in a body to use one.";
-
-/// What a new Template is called until the user types a title.
-const NEW_TITLE: &str = "Untitled template";
 
 pub(crate) fn init(cx: &mut App) {
     cx.bind_keys([KeyBinding::new("enter", OpenTemplate, Some(ROW_CONTEXT))]);
@@ -70,7 +67,7 @@ impl TemplatesView {
     /// The open Template's title as the editor has it, if one is open.
     pub(crate) fn open_title(&self, cx: &App) -> Option<SharedString> {
         let editor = self.editor.read(cx);
-        editor.item()?;
+        editor.target()?;
         Some(editor.title_input().read(cx).value())
     }
 
@@ -100,19 +97,19 @@ impl TemplatesView {
 
     fn open_template(&mut self, slug: &str, window: &mut Window, cx: &mut Context<Self>) {
         let space = self.model.read(cx).space();
-        let item = ItemRef::Template {
+        let target = EditorTarget::Template {
             space,
             slug: slug.to_string(),
         };
         self.editor
-            .update(cx, |editor, cx| editor.open(item, window, cx));
+            .update(cx, |editor, cx| editor.open(target, window, cx));
         cx.notify();
     }
 
     fn create_template(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let result = self
             .model
-            .update(cx, |model, cx| model.create_template(NEW_TITLE, cx));
+            .update(cx, |model, cx| model.create_template(UNTITLED_TEMPLATE, cx));
         match result {
             Ok(slug) => {
                 self.open_template(&slug, window, cx);
@@ -140,7 +137,7 @@ impl TemplatesView {
 
     fn delete(&mut self, slug: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.editor.update(cx, |editor, cx| {
-            if matches!(editor.item(), Some(ItemRef::Template { slug: open, .. }) if open == slug) {
+            if matches!(editor.target(), Some(EditorTarget::Template { slug: open, .. }) if open == slug) {
                 editor.discard(cx);
             }
         });
@@ -213,8 +210,8 @@ impl TemplatesView {
     }
 
     fn render_list(&self, templates: &[Template], cx: &mut Context<Self>) -> AnyElement {
-        let open = match self.editor.read(cx).item() {
-            Some(ItemRef::Template { slug, .. }) => Some(slug.clone()),
+        let open = match self.editor.read(cx).target() {
+            Some(EditorTarget::Template { slug, .. }) => Some(slug.clone()),
             _ => None,
         };
         let rows: Vec<AnyElement> = templates
@@ -246,21 +243,31 @@ impl TemplatesView {
     }
 
     fn render_empty(&self, cx: &mut Context<Self>) -> AnyElement {
-        v_flex()
+        // One centred group: a bare text div would stretch to the full width
+        // and sit flush left.
+        div()
             .size_full()
+            .flex()
             .items_center()
             .justify_center()
-            .gap_3()
             .child(
-                div()
-                    .id("templates-empty")
-                    .test_support()
-                    .aria_label(EMPTY_TEXT)
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(EMPTY_TEXT),
+                v_flex()
+                    .max_w(rems(24.))
+                    .px_6()
+                    .gap_3()
+                    .items_center()
+                    .text_center()
+                    .child(
+                        div()
+                            .id("templates-empty")
+                            .test_support()
+                            .aria_label(EMPTY_TEXT)
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(EMPTY_TEXT),
+                    )
+                    .child(self.new_button(cx)),
             )
-            .child(self.new_button(cx))
             .into_any_element()
     }
 }
@@ -272,10 +279,10 @@ fn show_error(what: &str, err: io::Error, window: &mut Window, cx: &mut App) {
 impl Render for TemplatesView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let templates: Vec<Template> = self.model.read(cx).templates().to_vec();
-        if templates.is_empty() && self.editor.read(cx).item().is_none() {
+        if templates.is_empty() && self.editor.read(cx).target().is_none() {
             return self.render_empty(cx);
         }
-        let editor = if self.editor.read(cx).item().is_some() {
+        let editor = if self.editor.read(cx).target().is_some() {
             self.editor.clone().into_any_element()
         } else {
             div()

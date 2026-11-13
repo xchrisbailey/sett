@@ -1135,6 +1135,8 @@ impl BlockEditorModel {
                         || inline.pieces().any(|(_, mark, _)| mark.code)
             )
         };
+        // FORK: the editor's own paste (`own`, which Insert Markdown uses) takes
+        // a one-paragraph body as blocks too, so a one-paragraph Template inserts.
         if blocks.is_empty()
             || (!own
                 && blocks.len() == 1
@@ -1792,14 +1794,10 @@ impl BlockEditorModel {
         })
     }
 
-    /// FORK: whether `InsertMarkdown` applies: top level only, because a
-    /// pasted Callout nested below it would lose its type on reload.
-    pub(crate) fn can_insert_markdown(&self) -> bool {
-        self.can_insert_callout()
-    }
-
     fn insert_markdown(&mut self, text: &str) -> Result<bool, CommandError> {
-        if !self.can_insert_markdown() {
+        // FORK: shares `InsertCallout`'s top-level rule, because a pasted
+        // Callout nested below it would lose its type on reload.
+        if !self.can_insert_callout() {
             return Err(CommandError::Unsupported("markdown here"));
         }
         self.paste_block_markdown(text, true)

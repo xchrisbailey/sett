@@ -31,7 +31,6 @@ pub(crate) fn confirm_delete(
     });
 }
 
-/// What deleting a Template does.
 pub(crate) const TEMPLATE_CONSEQUENCE: &str = "Tasks and Notes made from it aren\u{2019}t changed.";
 
 /// What deleting a Note or Task does.
