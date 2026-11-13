@@ -6,10 +6,10 @@ use gpui_kit::{App, Entity, IntoElement, RenderOnce, SharedString, Window};
 use sett_store::Project;
 
 use crate::app_model::{AppModel, Selection};
-use crate::icons::project_icon;
+use crate::icons::{TEMPLATES_ICON, project_icon};
 use crate::project_dialog;
 
-/// The left nav for the active Space: Journal and Notes, then the Projects
+/// The left nav for the active Space: Journal, Notes and Templates, then the Projects
 /// (Inbox first), then archived Projects in a folded group at the bottom.
 #[derive(IntoElement)]
 pub(crate) struct Nav {
@@ -119,7 +119,8 @@ impl RenderOnce for Nav {
             .child(
                 SidebarMenu::new()
                     .child(self.item("Journal", IconName::BookOpen, Selection::Journal, &current))
-                    .child(self.item("Notes", IconName::FileText, Selection::Notes, &current)),
+                    .child(self.item("Notes", IconName::FileText, Selection::Notes, &current))
+                    .child(self.item("Templates", TEMPLATES_ICON, Selection::Templates, &current)),
             )
             .child(
                 SidebarMenu::new().children(active.iter().map(|p| self.project_item(p, &current))),

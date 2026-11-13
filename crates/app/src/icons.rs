@@ -204,6 +204,11 @@ project_icons![
     LayoutDashboard,
 ];
 
+gpui_kit::assets::icon_assets!(NavIconAssets, [LayoutTemplate]);
+
+/// The Templates entry in the nav.
+pub(crate) const TEMPLATES_ICON: IconName = IconName::LayoutTemplate;
+
 /// What a Project shows when it has no icon, or one outside the curated set.
 pub(crate) const DEFAULT_ICON: IconName = IconName::Folder;
 
@@ -214,7 +219,10 @@ pub struct AppAssets;
 
 impl AssetSource for AppAssets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
-        match ProjectIconAssets.load(path)? {
+        if let Some(bytes) = ProjectIconAssets.load(path)? {
+            return Ok(Some(bytes));
+        }
+        match NavIconAssets.load(path)? {
             Some(bytes) => Ok(Some(bytes)),
             None => Assets.load(path),
         }
@@ -222,7 +230,11 @@ impl AssetSource for AppAssets {
 
     fn list(&self, path: &str) -> Result<Vec<SharedString>> {
         let mut paths = ProjectIconAssets.list(path)?;
-        for p in Assets.list(path)? {
+        for p in NavIconAssets
+            .list(path)?
+            .into_iter()
+            .chain(Assets.list(path)?)
+        {
             if !paths.contains(&p) {
                 paths.push(p);
             }

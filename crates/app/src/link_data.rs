@@ -35,16 +35,20 @@ pub(crate) fn wiki_link_directory(
     directory
 }
 
-/// The picker's candidates for someone editing `current`: every Note, Task and
+/// The picker's candidates for someone editing `current` (`None` for a
+/// Template, which isn't an Item): every Note, Task and
 /// Journal Entry of the Space except that one and those in archived Projects.
 ///
 /// An Item is `reachable` only if a Link to its slug resolves to it; when
 /// another Item shares the slug (after edits made outside sett) the Link
 /// would open the wrong one, so the picker won't insert it.
-pub(crate) fn link_candidates(index: &SpaceIndex, current: &ItemId) -> Arc<[LinkCandidate]> {
+pub(crate) fn link_candidates(
+    index: &SpaceIndex,
+    current: Option<&ItemId>,
+) -> Arc<[LinkCandidate]> {
     let mut candidates = Vec::new();
     let mut add = |id: ItemId, title: &str, modified: Option<SystemTime>| {
-        if &id == current {
+        if Some(&id) == current {
             return;
         }
         let reachable = matches!(
