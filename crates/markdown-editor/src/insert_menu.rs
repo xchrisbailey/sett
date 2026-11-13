@@ -26,6 +26,41 @@ pub struct InsertMenuOption {
     aliases: Vec<SharedString>,
     hint: Option<SharedString>,
     command: EditorCommand,
+    section: Option<SharedString>,
+}
+
+/// One line of the drawn menu: a section header, or option `ix` of the
+/// filtered list. Headers aren't options, so the highlight and the arrow
+/// keys count only `Option` rows.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum Row {
+    /// `divider` is set when rows come before the header.
+    Header {
+        label: SharedString,
+        divider: bool,
+    },
+    Option(usize),
+}
+
+/// Lay out the filtered `options` (already grouped by section, see
+/// [`BlockEditorState::insert_menu_matches`]) with a header before the first
+/// option of each section. Only sections that have a visible option get one.
+pub(crate) fn rows(options: &[&InsertMenuOption]) -> Vec<Row> {
+    let mut rows = Vec::with_capacity(options.len());
+    let mut current: Option<&SharedString> = None;
+    for (ix, option) in options.iter().enumerate() {
+        if option.section.as_ref() != current {
+            current = option.section.as_ref();
+            if let Some(label) = current {
+                rows.push(Row::Header {
+                    label: label.clone(),
+                    divider: !rows.is_empty(),
+                });
+            }
+        }
+        rows.push(Row::Option(ix));
+    }
+    rows
 }
 
 impl InsertMenuOption {
@@ -35,7 +70,19 @@ impl InsertMenuOption {
             aliases: Vec::new(),
             hint: None,
             command,
+            section: None,
         }
+    }
+
+    /// Put the option under a muted header with this label. Options without
+    /// a section come first and have no header.
+    pub fn section(mut self, label: impl Into<SharedString>) -> Self {
+        self.section = Some(label.into());
+        self
+    }
+
+    pub fn section_label(&self) -> Option<&SharedString> {
+        self.section.as_ref()
     }
 
     /// Extra words the filter matches, besides the label.
@@ -181,13 +228,42 @@ impl BlockEditorState {
             return Vec::new();
         };
         let callouts = self.model.can_insert_callout();
-        self.insert_menu_options
+        let mut matches: Vec<_> = self
+            .insert_menu_options
             .iter()
             .filter(|option| {
                 callouts || !matches!(option.command(), EditorCommand::InsertCallout(_))
             })
             .filter(|option| option.matches(query))
-            .collect()
+            .collect();
+        // Group by section so the list reads top to bottom as drawn:
+        // unsectioned options first, then sections in the order they first
+        // appear. The sort is stable, so order within a group is kept.
+        let mut order: Vec<Option<&SharedString>> = vec![None];
+        for option in &matches {
+            if !order.contains(&option.section.as_ref()) {
+                order.push(option.section.as_ref());
+            }
+        }
+        matches.sort_by_key(|option| order.iter().position(|s| *s == option.section.as_ref()));
+        matches
+    }
+
+    /// Replace the options the menu offers. An open menu keeps its current
+    /// rows (a row can't change under the user's arrow keys); the new
+    /// options apply the next time it opens.
+    pub fn set_insert_menu_options(
+        &mut self,
+        options: impl IntoIterator<Item = InsertMenuOption>,
+        _cx: &mut Context<Self>,
+    ) {
+        let options: Vec<_> = options.into_iter().collect();
+        if self.insert_menu.is_some() {
+            self.pending_insert_menu_options = Some(options);
+        } else {
+            self.pending_insert_menu_options = None;
+            self.insert_menu_options = options;
+        }
     }
 
     /// The highlighted option's index in [`Self::insert_menu_matches`].
@@ -198,6 +274,11 @@ impl BlockEditorState {
     /// Open the menu if the caret's paragraph holds exactly the `/` just
     /// typed. Called after typing, never during IME composition.
     pub(crate) fn maybe_open_insert_menu(&mut self, cx: &mut Context<Self>) {
+        if self.insert_menu.is_none()
+            && let Some(options) = self.pending_insert_menu_options.take()
+        {
+            self.insert_menu_options = options;
+        }
         if self.readonly || self.is_composing() || self.insert_menu_options.is_empty() {
             return;
         }
@@ -285,6 +366,7 @@ impl BlockEditorState {
 /// The open Insert Menu as a deferred, window-anchored popover.
 pub(crate) fn render(
     state: &gpui::Entity<BlockEditorState>,
+    window: &gpui::Window,
     cx: &gpui::App,
 ) -> Option<gpui::AnyElement> {
     use gpui::prelude::FluentBuilder as _;
@@ -295,33 +377,109 @@ pub(crate) fn render(
     let at = s.insert_menu_anchor()?;
     let highlighted = s.insert_menu_highlighted()?;
     let theme = cx.theme();
-    let options = s
-        .insert_menu_matches()
+    let matches = s.insert_menu_matches();
+    let layout = rows(&matches);
+    let highlighted_row = layout
+        .iter()
+        .position(|row| *row == Row::Option(highlighted));
+    let rows = layout
         .into_iter()
-        .enumerate()
-        .map(|(ix, option)| {
-            let on = ix == highlighted;
-            menu::option_row(state, MenuSlot::Insert, ix, option.label().clone(), on, cx)
-                .justify_between()
-                .child(option.label().clone())
-                .when_some(option.hint_text().cloned(), |this, hint| {
-                    this.child(
-                        div()
-                            .text_xs()
-                            .font_family(theme.mono_font_family.clone())
-                            .text_color(theme.muted_foreground)
-                            .child(hint),
-                    )
+        .map(|row| match row {
+            Row::Header { label, divider } => div()
+                .when(divider, |this| {
+                    this.mt_1().pt_1().border_t_1().border_color(theme.border)
                 })
-                .into_any_element()
+                .px_2()
+                .py_1()
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .child(label)
+                .into_any_element(),
+            Row::Option(ix) => {
+                let option = matches[ix];
+                let on = ix == highlighted;
+                menu::option_row(state, MenuSlot::Insert, ix, option.label().clone(), on, cx)
+                    .justify_between()
+                    .child(option.label().clone())
+                    .when_some(option.hint_text().cloned(), |this, hint| {
+                        this.child(
+                            div()
+                                .text_xs()
+                                .font_family(theme.mono_font_family.clone())
+                                .text_color(theme.muted_foreground)
+                                .child(hint),
+                        )
+                    })
+                    .into_any_element()
+            }
         })
-        .collect::<Vec<_>>();
-    Some(menu::popover(state, MenuSlot::Insert, at, options, cx))
+        .collect();
+    Some(menu::popover(
+        state,
+        MenuSlot::Insert,
+        at,
+        menu::Content {
+            header: None,
+            rows,
+            highlighted: highlighted_row,
+        },
+        window,
+        cx,
+    ))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::InsertMenuOption;
+    use super::{InsertMenuOption, Row, rows};
+    use crate::command::EditorCommand;
+
+    fn opt(label: &str, section: Option<&str>) -> InsertMenuOption {
+        let option = InsertMenuOption::new(label.to_string(), EditorCommand::ToggleTask);
+        match section {
+            Some(section) => option.section(section.to_string()),
+            None => option,
+        }
+    }
+
+    /// `Header(label, divider)` or `Option(ix)`, for comparing layouts.
+    fn layout(options: &[InsertMenuOption]) -> Vec<String> {
+        let refs: Vec<_> = options.iter().collect();
+        rows(&refs)
+            .into_iter()
+            .map(|row| match row {
+                Row::Header { label, divider } => format!("{label}/{divider}"),
+                Row::Option(ix) => ix.to_string(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_header_leads_each_section_and_unsectioned_options_have_none() {
+        let options = [
+            opt("a", None),
+            opt("b", Some("Templates")),
+            opt("c", Some("Templates")),
+            opt("d", Some("Other")),
+        ];
+        assert_eq!(
+            layout(&options),
+            ["0", "Templates/true", "1", "2", "Other/true", "3"]
+        );
+    }
+
+    #[test]
+    fn no_divider_when_the_header_is_the_first_row() {
+        let options = [opt("b", Some("Templates")), opt("c", Some("Templates"))];
+        assert_eq!(layout(&options), ["Templates/false", "0", "1"]);
+    }
+
+    #[test]
+    fn a_section_without_visible_options_draws_no_header() {
+        let options = [opt("apple", None), opt("pear", Some("Templates"))];
+        let shown: Vec<_> = options.iter().filter(|o| o.matches("app")).collect();
+        let layout: Vec<_> = rows(&shown);
+        assert_eq!(layout, [Row::Option(0)]);
+    }
 
     fn labels(query: &str) -> Vec<String> {
         InsertMenuOption::defaults()

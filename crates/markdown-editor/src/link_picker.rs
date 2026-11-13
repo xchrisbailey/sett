@@ -13,7 +13,7 @@ use std::cmp::Reverse;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use gpui::{Context, Pixels, Point, SharedString, px, rems};
+use gpui::{Context, Pixels, Point, SharedString, px};
 
 use super::{
     editor::BlockEditorModel,
@@ -25,9 +25,6 @@ use super::{
     state::BlockEditorState,
     transaction::EditOrigin,
 };
-
-/// The tallest the list grows before it scrolls (about eight rows).
-const MAX_HEIGHT_REMS: f32 = 14.75;
 
 /// What the Link Picker is open on: the offset of the first `[` of the typed
 /// `[[`, the last offset the query ran to, and the query last matched.
@@ -314,8 +311,8 @@ impl BlockEditorState {
             if self.link_row_pickable(ix) {
                 if let Some(menu) = &mut self.link_picker {
                     menu.highlighted = ix;
+                    menu.reveal_highlighted();
                 }
-                self.link_scroll.scroll_to_item(ix);
                 cx.notify();
                 return;
             }
@@ -443,6 +440,7 @@ impl BlockEditorState {
 /// The open Link Picker as a deferred, window-anchored popover.
 pub(crate) fn render(
     state: &gpui::Entity<BlockEditorState>,
+    window: &gpui::Window,
     cx: &gpui::App,
 ) -> Option<gpui::AnyElement> {
     use gpui::prelude::FluentBuilder as _;
@@ -459,16 +457,9 @@ pub(crate) fn render(
     let theme = cx.theme();
     let muted = theme.muted_foreground;
     let rows = s.link_picker_matches();
-    let list = div()
-        .id("link-picker-list")
-        .flex()
-        .flex_col()
-        .max_h(rems(MAX_HEIGHT_REMS))
-        .overflow_y_scroll()
-        .track_scroll(&s.link_scroll);
     let create = s.link_picker_create_title();
-    let list = if rows.is_empty() && create.is_none() {
-        list.child(
+    let list: Vec<gpui::AnyElement> = if rows.is_empty() && create.is_none() {
+        vec![
             div()
                 .id("link-picker-empty")
                 .role(Role::Label)
@@ -477,59 +468,68 @@ pub(crate) fn render(
                 .px_2()
                 .py_1()
                 .text_color(muted)
-                .child("No matching Items"),
-        )
+                .child("No matching Items")
+                .into_any_element(),
+        ]
     } else {
         let create_ix = rows.len();
-        list.children(rows.into_iter().enumerate().map(|(ix, c)| {
-            let on = ix == highlighted && c.reachable;
-            let hint = format!("Another Item has the slug `{}`", c.slug);
-            menu::option_row(state, MenuSlot::Link, ix, c.title.clone(), on, cx)
-                .flex_col()
-                .items_start()
-                .gap_0()
-                .when(!c.reachable, |this| this.opacity(0.5).cursor_default())
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .child(c.title.clone())
-                        .child(div().text_xs().text_color(muted).child(c.detail.clone())),
-                )
-                .when(!c.reachable, |this| {
-                    this.child(
+        rows.into_iter()
+            .enumerate()
+            .map(|(ix, c)| {
+                let on = ix == highlighted && c.reachable;
+                let hint = format!("Another Item has the slug `{}`", c.slug);
+                menu::option_row(state, MenuSlot::Link, ix, c.title.clone(), on, cx)
+                    .flex_col()
+                    .items_start()
+                    .gap_0()
+                    .when(!c.reachable, |this| this.opacity(0.5).cursor_default())
+                    .child(
                         div()
-                            .id(("link-picker-hint", ix))
-                            .role(Role::Label)
-                            .test_support()
-                            .aria_label(hint.clone())
-                            .text_xs()
-                            .text_color(muted)
-                            .child(hint),
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(c.title.clone())
+                            .child(div().text_xs().text_color(muted).child(c.detail.clone())),
                     )
-                })
+                    .when(!c.reachable, |this| {
+                        this.child(
+                            div()
+                                .id(("link-picker-hint", ix))
+                                .role(Role::Label)
+                                .test_support()
+                                .aria_label(hint.clone())
+                                .text_xs()
+                                .text_color(muted)
+                                .child(hint),
+                        )
+                    })
+                    .into_any_element()
+            })
+            .chain(create.map(|title| {
+                let on = highlighted == create_ix;
+                menu::option_row(
+                    state,
+                    MenuSlot::Link,
+                    create_ix,
+                    format!("Create Note \"{title}\""),
+                    on,
+                    cx,
+                )
+                .child(format!("Create Note \"{title}\""))
                 .into_any_element()
-        }))
-        .children(create.map(|title| {
-            let on = highlighted == create_ix;
-            menu::option_row(
-                state,
-                MenuSlot::Link,
-                create_ix,
-                format!("Create Note \"{title}\""),
-                on,
-                cx,
-            )
-            .child(format!("Create Note \"{title}\""))
-            .into_any_element()
-        }))
+            }))
+            .collect()
     };
     Some(menu::popover(
         state,
         MenuSlot::Link,
         at,
-        [list.into_any_element()],
+        menu::Content {
+            header: None,
+            rows: list,
+            highlighted: Some(highlighted),
+        },
+        window,
         cx,
     ))
 }

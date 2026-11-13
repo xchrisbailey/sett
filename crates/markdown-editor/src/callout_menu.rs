@@ -98,6 +98,7 @@ impl BlockEditorState {
 /// The open type menu as a deferred, window-anchored popover.
 pub(crate) fn render(
     state: &gpui::Entity<BlockEditorState>,
+    window: &gpui::Window,
     cx: &gpui::App,
 ) -> Option<gpui::AnyElement> {
     use gpui::{IntoElement as _, Styled as _, div};
@@ -151,5 +152,18 @@ pub(crate) fn render(
         .collect();
     options.push(div().my_1().h_px().bg(theme.border).into_any_element());
     options.push(option(types.len(), plain[0]));
-    Some(menu::popover(state, MenuSlot::Callout, at, options, cx))
+    // The divider is a row of its own, so the last option sits one row down.
+    let highlighted_row = highlighted + usize::from(highlighted >= types.len());
+    Some(menu::popover(
+        state,
+        MenuSlot::Callout,
+        at,
+        menu::Content {
+            header: None,
+            rows: options,
+            highlighted: Some(highlighted_row),
+        },
+        window,
+        cx,
+    ))
 }

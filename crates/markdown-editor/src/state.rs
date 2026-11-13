@@ -551,6 +551,8 @@ pub struct BlockEditorState {
     /// FORK: the open Insert Menu, and the options it offers.
     pub(crate) insert_menu: Option<super::menu::OpenMenu>,
     pub(crate) insert_menu_options: Vec<super::insert_menu::InsertMenuOption>,
+    /// Options set while the menu was open; they apply when it next opens.
+    pub(crate) pending_insert_menu_options: Option<Vec<super::insert_menu::InsertMenuOption>>,
     /// FORK: the open Callout type menu.
     pub(crate) callout_menu: Option<super::menu::OpenMenu>,
     /// FORK: the open Language Menu (`language_menu.rs`), query included.
@@ -559,7 +561,6 @@ pub struct BlockEditorState {
     pub(crate) link_picker: Option<super::menu::OpenMenu>,
     pub(crate) link_query: super::link_picker::LinkQuery,
     pub(crate) link_candidates: std::sync::Arc<[super::link_picker::LinkCandidate]>,
-    pub(crate) link_scroll: gpui::ScrollHandle,
     /// The table grips the pointer shows (to repaint on change).
     pub(crate) table_hover: Vec<(BlockId, crate::TableLine)>,
     /// The pointer is on a table grip (grab cursor).
@@ -645,12 +646,12 @@ impl BlockEditorState {
             // FORK
             insert_menu: None,
             insert_menu_options: super::insert_menu::InsertMenuOption::defaults(),
+            pending_insert_menu_options: None,
             callout_menu: None,
             language_menu: None,
             link_picker: None,
             link_query: Default::default(),
             link_candidates: Vec::new().into(),
-            link_scroll: gpui::ScrollHandle::new(),
             table_hover: Vec::new(),
             grip_hover: false,
             _subscriptions: subscriptions,
