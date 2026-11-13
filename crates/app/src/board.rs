@@ -15,9 +15,10 @@ use gpui_kit::{
     AnyElement, App, AppContext as _, Context, ElementId, Entity, EventEmitter, FocusHandle,
     Focusable as _, InteractiveElement as _, IntoElement, KeyBinding, ParentElement as _, Render,
     Role, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription,
-    TestSupportExt as _, Window, actions, div, prelude::FluentBuilder as _,
+    TestSupportExt as _, Window, actions, div, prelude::FluentBuilder as _, px,
 };
-use sett_store::{Board, BoardColumn, Date, Task};
+use markdown_editor::CalloutKind;
+use sett_store::{Board, BoardColumn, CalloutKind as TaskCalloutKind, Date, Task, TaskCallout};
 
 use crate::app_model::{AppModel, Selection};
 use crate::confirm_delete::{ITEM_CONSEQUENCE, confirm_delete};
@@ -556,6 +557,9 @@ impl BoardView {
                 .child(format!("{checked}/{total}"))
         });
         let has_meta = due.is_some() || checklist.is_some();
+        let callout = task.first_callout();
+        let description = callout.as_ref().map(callout_description);
+        let callout = callout.map(|callout| callout_line(&callout, cx));
 
         let (click_slug, key_slug, menu_slug) = (slug.clone(), slug.clone(), slug.clone());
         let menu_title = task.title.clone();
@@ -568,6 +572,9 @@ impl BoardView {
             .role(Role::ListItem)
             .test_support()
             .aria_label(title.clone())
+            .when_some(description, |card, description| {
+                card.aria_description(description)
+            })
             .gap_1()
             .px_3()
             .py_2()
@@ -609,6 +616,7 @@ impl BoardView {
                 ))
             })
             .child(div().text_sm().child(title))
+            .children(callout)
             .when(has_meta, |card| {
                 card.child(
                     h_flex()
@@ -631,6 +639,77 @@ impl BoardView {
                 )
             })
     }
+}
+
+/// How many lines of a Callout a Card shows, hard breaks included.
+const CARD_CALLOUT_LINES: usize = 2;
+
+/// The editor's kind for the store's. Spelled out so a new kind on either
+/// side fails to compile here instead of panicking while drawing a Card.
+fn callout_kind(kind: TaskCalloutKind) -> CalloutKind {
+    match kind {
+        TaskCalloutKind::Note => CalloutKind::Note,
+        TaskCalloutKind::Tip => CalloutKind::Tip,
+        TaskCalloutKind::Important => CalloutKind::Important,
+        TaskCalloutKind::Warning => CalloutKind::Warning,
+        TaskCalloutKind::Caution => CalloutKind::Caution,
+    }
+}
+
+/// What a Card's accessible description says about its Callout:
+/// `<Type>: <first two lines joined with a space>`, with "\u{2026}" when more follow.
+fn callout_description(callout: &TaskCallout) -> String {
+    let (shown, more) = callout.shown(CARD_CALLOUT_LINES);
+    let ellipsis = if more { "\u{2026}" } else { "" };
+    format!(
+        "{}: {}{ellipsis}",
+        callout_kind(callout.kind).label(),
+        shown.join(" ")
+    )
+}
+
+/// The quiet line under a Card's title: the type's icon in its colour, then
+/// the Callout's text, muted, in at most two lines in all, ending in an
+/// ellipsis when cut. `line_clamp` counts again after each hard break, so a
+/// Callout of several lines is drawn one line at a time instead.
+fn callout_line(callout: &TaskCallout, cx: &App) -> impl IntoElement + use<> {
+    let kind = callout_kind(callout.kind);
+    let color = markdown_editor::callout_color(kind, cx);
+    let muted = cx.theme().muted_foreground;
+    let (shown, more) = callout.shown(CARD_CALLOUT_LINES);
+    let text = match shown {
+        [only] if !more => div()
+            .text_ellipsis()
+            .line_clamp(CARD_CALLOUT_LINES)
+            .child(only.clone())
+            .into_any_element(),
+        lines => v_flex()
+            .children(lines.iter().enumerate().map(|(ix, line)| {
+                // Cut after the last visible line: the ellipsis is the text's
+                // own when more lines follow.
+                let line = if more && ix + 1 == lines.len() {
+                    format!("{line}\u{2026}")
+                } else {
+                    line.clone()
+                };
+                div().truncate().child(line)
+            }))
+            .into_any_element(),
+    };
+    h_flex()
+        .items_start()
+        .gap_1()
+        .text_xs()
+        .text_color(muted)
+        .child(
+            // Level with the first line of text, which is a touch taller.
+            Icon::default()
+                .data(markdown_editor::callout_icon(kind))
+                .xsmall()
+                .text_color(color)
+                .mt(px(2.)),
+        )
+        .child(div().flex_1().min_w_0().child(text))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

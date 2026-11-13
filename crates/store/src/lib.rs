@@ -6,6 +6,7 @@
 //! that an Item is written only after it was edited (ADR 0003).
 
 mod board;
+mod callout;
 mod date;
 mod frontmatter;
 mod index;
@@ -24,6 +25,7 @@ use std::sync::Arc;
 use serde_yaml_ng::{Mapping, Value};
 
 pub use board::{Board, BoardColumn, MIN_COLUMNS};
+pub use callout::{CalloutKind, TaskCallout};
 pub use date::Date;
 use frontmatter::Document;
 pub use index::{Change, SpaceIndex, Update};
