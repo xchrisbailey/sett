@@ -2,7 +2,9 @@
 
 How to run several agents on separate branches at the same time.
 
-- **One worktree per branch**, outside the repo: `git worktree add -b <branch> ../sett-wt/<name> <base>`.
+- **One worktree per branch**, outside the repo: `git worktree add -b <branch> ../sett-wt/<name> <base>`. Use these for every subagent, research included, rather than the Agent tool's own isolation: its worktrees under `.claude/worktrees/` refuse `git config` and many compound commands.
+- **The pre-commit hook is already on** in every worktree: `core.hooksPath` lives in the shared `.git/config`.
+- **Screenshots come from the main session.** A subagent's `scripts/screenshot` fails with "could not create image from window" even in the plain form, because the sandbox exception doesn't reach subagents. The main session captures a worktree's build with `CARGO_TARGET_DIR=../sett-wt/.target-<name> scripts/screenshot --root ../sett-wt/<name> …`, with no need to switch the main checkout.
 - **Give each worktree its own `CARGO_TARGET_DIR`**, for example `../sett-wt/.target-<name>`. With one shared target dir across worktrees, Cargo once linked another worktree's `sett-store` (same package name and version, different path), and the tests ran against the wrong code.
 - **Budget disk space.** Each target dir grows to 6–19 GB, because the GPUI dependency tree is large.
 - **Implementer branches stay local.** Merge them into the integration branch locally, and push only the integration branch. Deleting remote branches is blocked for agents.

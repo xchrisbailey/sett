@@ -1,4 +1,5 @@
-// Prints the CGWindowID of the first normal on-screen window owned by a PID.
+// Prints the CGWindowID of the first normal on-screen window owned by a PID,
+// then its width and height in points.
 // Used by scripts/screenshot. Owner PIDs are readable without Screen Recording
 // permission; window titles are not, so we match by PID.
 import CoreGraphics
@@ -13,9 +14,12 @@ let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID)
 for window in windows {
     guard (window[kCGWindowOwnerPID as String] as? Int) == pid,
           (window[kCGWindowLayer as String] as? Int) == 0,
-          let id = window[kCGWindowNumber as String] as? Int
+          let id = window[kCGWindowNumber as String] as? Int,
+          let bounds = window[kCGWindowBounds as String] as? [String: Any],
+          let width = bounds["Width"] as? Double,
+          let height = bounds["Height"] as? Double
     else { continue }
-    print(id)
+    print(id, Int(width), Int(height))
     exit(0)
 }
 exit(1)
