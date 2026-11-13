@@ -9,6 +9,7 @@ use gpui::{
 
 use crate::support::secondary_modifier;
 use crate::{BlockEditor, BlockEditorState, BlockKind, BlockPosition, BlockSelection};
+use gpui_kit::test::TestQueryExt as _;
 
 struct Root(Entity<BlockEditorState>);
 
@@ -4383,4 +4384,96 @@ fn closing_first_rules_leave_literal_punctuation(cx: &mut TestAppContext) {
     caret_at(&editor, cx, 0, 2);
     type_chars(cx, "*");
     assert_eq!(source(&editor, cx), "`a *b*`", "inside inline code");
+}
+
+fn open_with_options(
+    cx: &mut TestAppContext,
+    options: Vec<crate::InsertMenuOption>,
+) -> (Entity<BlockEditorState>, &mut VisualTestContext) {
+    let (editor, cx) = open(cx, "");
+    editor.update(cx, |e, _| e.set_insert_menu_options(options));
+    (editor, cx)
+}
+
+fn template_options(n: usize) -> Vec<crate::InsertMenuOption> {
+    let mut options = vec![crate::InsertMenuOption::new(
+        "Quote",
+        crate::EditorCommand::ToggleBlockquote,
+    )];
+    options.extend((0..n).map(|i| {
+        crate::InsertMenuOption::new(format!("Template {i}"), crate::EditorCommand::ToggleTask)
+            .section("Templates")
+    }));
+    options
+}
+
+fn menu_labels(editor: &Entity<BlockEditorState>, cx: &VisualTestContext) -> Vec<String> {
+    editor.read_with(cx, |e, _| {
+        e.insert_menu_matches()
+            .iter()
+            .map(|o| o.label().to_string())
+            .collect()
+    })
+}
+
+/// Headers are drawn but never counted: ↑/↓ step through the options only,
+/// wrapping, however many headers lie between them.
+#[gpui::test]
+fn arrow_keys_never_land_on_a_section_header(cx: &mut TestAppContext) {
+    let (editor, cx) = open_with_options(cx, template_options(2));
+    type_text(cx, "/");
+    let highlighted =
+        |cx: &VisualTestContext| editor.read_with(cx, |e, _| e.insert_menu_highlighted());
+    assert_eq!(menu_labels(&editor, cx).len(), 3);
+    let mut seen = vec![highlighted(cx)];
+    for _ in 0..3 {
+        keys(cx, "down");
+        seen.push(highlighted(cx));
+    }
+    assert_eq!(seen, [Some(0), Some(1), Some(2), Some(0)]);
+    keys(cx, "up");
+    assert_eq!(highlighted(cx), Some(2));
+}
+
+/// Options set while the menu is open change nothing until it reopens.
+#[gpui::test]
+fn options_set_while_open_apply_on_reopen(cx: &mut TestAppContext) {
+    let (editor, cx) = open_with_options(cx, template_options(2));
+    type_text(cx, "/");
+    assert_eq!(
+        menu_labels(&editor, cx),
+        ["Quote", "Template 0", "Template 1"]
+    );
+    editor.update(cx, |e, _| e.set_insert_menu_options(template_options(1)));
+    draw(cx);
+    assert_eq!(
+        menu_labels(&editor, cx),
+        ["Quote", "Template 0", "Template 1"]
+    );
+    keys(cx, "escape backspace");
+    type_text(cx, "/");
+    assert_eq!(menu_labels(&editor, cx), ["Quote", "Template 0"]);
+}
+
+/// A long menu stops at the cap (19rem, less if the window is short) and
+/// scrolls inside, so a highlighted row near the bottom stays in view.
+#[gpui::test]
+fn a_long_menu_is_capped_and_scrolls(cx: &mut TestAppContext) {
+    let (_editor, cx) = open_with_options(cx, template_options(40));
+    type_text(cx, "/");
+    let (menu, rem) = cx.update(|window, _| {
+        let menu = window.find_by_label("Insert Menu").bounds();
+        (menu, window.rem_size())
+    });
+    assert!(
+        menu.size.height <= rem * 19.,
+        "{:?} is over the cap",
+        menu.size.height
+    );
+    for _ in 0..30 {
+        keys(cx, "down");
+    }
+    draw(cx);
+    let row = cx.update(|window, _| window.find_by_label("Template 29").bounds());
+    assert!(menu.contains(&row.center()), "{row:?} outside {menu:?}");
 }

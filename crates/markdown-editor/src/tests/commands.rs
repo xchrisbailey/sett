@@ -973,3 +973,75 @@ fn set_callout_outside_a_quote_is_refused() {
     );
     assert_eq!(m.source(), "text");
 }
+
+// FORK: InsertMarkdown holds a Template for the Insert Menu.
+
+const TEMPLATE: &str =
+    "# Title\n\n- one\n- two\n\n> [!NOTE]\n> Careful\n\n```rust\nfn main() {}\n```";
+
+#[test]
+fn insert_markdown_replaces_the_slash_paragraph_in_one_undo_step() {
+    let typed = "before\n\n/tem\n\nafter";
+    let mut m = model(typed);
+    let pos = caret_in(&mut m, 1, 4);
+    m.apply_insert_option(pos.block, EditorCommand::InsertMarkdown(TEMPLATE.into()));
+    assert_eq!(m.source(), format!("before\n\n{TEMPLATE}\n\nafter"));
+    // The caret ends after the inserted body, in its last block.
+    let caret = m.caret().unwrap();
+    assert_eq!(m.doc().leaf_text(caret.block), Some("fn main() {}"));
+    assert!(m.undo());
+    assert_eq!(m.source(), typed);
+}
+
+#[test]
+fn insert_markdown_inserts_a_one_paragraph_body() {
+    let mut m = model("before\n\n/x\n\nafter");
+    let pos = caret_in(&mut m, 1, 2);
+    m.apply_insert_option(
+        pos.block,
+        EditorCommand::InsertMarkdown("Just *text*".into()),
+    );
+    assert_eq!(m.source(), "before\n\nJust *text*\n\nafter");
+    assert!(m.undo());
+    assert_eq!(m.source(), "before\n\n/x\n\nafter");
+}
+
+#[test]
+fn insert_markdown_is_refused_below_the_top_level() {
+    for source in ["- item", "> quoted", "> [!NOTE]\n> inside"] {
+        let mut m = model(source);
+        caret_at_end(&mut m, 0);
+        assert!(!m.can_insert_callout(), "{source}");
+        assert!(
+            m.run(EditorCommand::InsertMarkdown("# Hi\n\ntext".into()))
+                .is_err(),
+            "{source}"
+        );
+        assert_eq!(m.source(), source);
+    }
+}
+
+#[test]
+fn a_copied_callout_pastes_back_as_a_callout() {
+    let mut m = model("> [!TIP]\n> one\n>\n> two\n\n");
+    let first = m.document().root().children().next().unwrap().id();
+    m.set_selection(BlockSelection::Blocks {
+        anchor: first,
+        head: first,
+    })
+    .unwrap();
+    let (text, kind) = m.copy_selection();
+    caret_in(&mut m, 2, 0);
+    m.paste_clipboard(&text, false, &kind).unwrap();
+    assert_eq!(
+        m.source(),
+        "> [!TIP]\n> one\n>\n> two\n\n> [!TIP]\n> one\n>\n> two"
+    );
+}
+
+#[test]
+fn a_pasted_top_level_callout_marker_becomes_a_callout() {
+    let mut m = model("");
+    assert!(m.paste_blocks_markdown("> [!NOTE]\n> hi\n\nafter").unwrap());
+    assert_eq!(m.source(), "> [!NOTE]\n> hi\n\nafter");
+}

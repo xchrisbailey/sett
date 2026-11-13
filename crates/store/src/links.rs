@@ -137,6 +137,18 @@ impl LinkGraph {
             .collect()
     }
 
+    /// The Links `body` makes, resolved here, for text that isn't an Item
+    /// (a Template).
+    pub(crate) fn links_in(&self, body: &str) -> Vec<Link> {
+        parse(body)
+            .into_iter()
+            .map(|slug| Link {
+                target: self.resolve(&slug),
+                slug,
+            })
+            .collect()
+    }
+
     /// Sources sorted the same way a duplicated slug is resolved. An Item's
     /// Links to itself aren't listed.
     pub(crate) fn inbound_links(&self, item: &ItemId) -> Vec<InboundLink> {

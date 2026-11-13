@@ -12,10 +12,11 @@ use sett_store::{ItemId, Space};
 use crate::app_model::{AppModel, AppModelEvent, Selection};
 use crate::board::{BoardEvent, BoardView};
 use crate::dates::today;
-use crate::item_editor::{ItemEditor, ItemRef};
+use crate::item_editor::{ItemEditor, ItemRef, UNTITLED_TEMPLATE};
 use crate::notes::{NotesScope, NotesView};
 use crate::notice::frontmatter_notice;
 use crate::task_view::{TaskView, TaskViewEvent};
+use crate::templates::TemplatesView;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 enum ProjectTab {
@@ -32,6 +33,7 @@ pub(crate) struct CenterPanel {
     /// Shown in place of the Board while a Task is open.
     task: Entity<TaskView>,
     notes: Entity<NotesView>,
+    templates: Entity<TemplatesView>,
     project_notes: Entity<NotesView>,
     journal: Entity<ItemEditor>,
     project_tab: ProjectTab,
@@ -74,6 +76,7 @@ impl CenterPanel {
             }),
         ];
         let notes = cx.new(|cx| NotesView::new(model.clone(), NotesScope::Space, window, cx));
+        let templates = cx.new(|cx| TemplatesView::new(model.clone(), window, cx));
         let project_notes =
             cx.new(|cx| NotesView::new(model.clone(), NotesScope::SelectedProject, window, cx));
         let journal = cx.new(|cx| ItemEditor::new(model.clone(), window, cx));
@@ -82,6 +85,7 @@ impl CenterPanel {
             board,
             task,
             notes,
+            templates,
             project_notes,
             journal,
             project_tab: ProjectTab::default(),
@@ -118,6 +122,8 @@ impl CenterPanel {
             self.notes.update(cx, |notes, cx| notes.flush(window, cx));
             self.project_notes
                 .update(cx, |notes, cx| notes.flush(window, cx));
+            self.templates
+                .update(cx, |templates, cx| templates.flush(window, cx));
             self.task.update(cx, |task, cx| task.close(window, cx));
             self.journal
                 .update(cx, |journal, cx| journal.flush(window, cx));
@@ -256,6 +262,40 @@ impl CenterPanel {
             .into_any_element()
     }
 
+    /// `Templates › <title>`, where the first goes back to the list.
+    fn render_template_page(
+        &self,
+        title: SharedString,
+        body: AnyElement,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let templates = self.templates.downgrade();
+        // An untitled editor box still names the file it is editing.
+        let title = if title.trim().is_empty() {
+            SharedString::from(UNTITLED_TEMPLATE)
+        } else {
+            title
+        };
+        let header = self.render_header_bar(cx).child(
+            div().id("template-breadcrumb").test_support().child(
+                Breadcrumb::new()
+                    .child(
+                        BreadcrumbItem::new("Templates").on_click(move |_, window, cx| {
+                            templates
+                                .update(cx, |templates, cx| templates.close(window, cx))
+                                .ok();
+                        }),
+                    )
+                    .child(BreadcrumbItem::new(title)),
+            ),
+        );
+        v_flex()
+            .size_full()
+            .child(header)
+            .child(div().flex_1().min_h_0().child(body))
+            .into_any_element()
+    }
+
     fn render_page(&self, title: &'static str, body: AnyElement, cx: &Context<Self>) -> AnyElement {
         v_flex()
             .size_full()
@@ -274,6 +314,13 @@ impl Render for CenterPanel {
             }
             Selection::Notes => {
                 self.render_page("Notes", self.notes.clone().into_any_element(), cx)
+            }
+            Selection::Templates => {
+                let body = self.templates.clone().into_any_element();
+                match self.templates.read(cx).open_title(cx) {
+                    Some(title) => self.render_template_page(title, body, cx),
+                    None => self.render_page("Templates", body, cx),
+                }
             }
             Selection::Project(slug) => match model.index().project(&slug) {
                 Some(project) => {

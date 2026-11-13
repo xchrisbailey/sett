@@ -57,6 +57,10 @@ pub enum EditorCommand {
     /// FORK: insert an empty Callout after the caret's block, replacing it
     /// when it is an empty paragraph, and put the caret on its empty line.
     InsertCallout(CalloutKind),
+    /// FORK: insert a Markdown body (a Template) at the caret's block, as
+    /// the editor's own block paste does. Top level only, like
+    /// `InsertCallout`.
+    InsertMarkdown(SharedString),
 }
 
 #[non_exhaustive]
@@ -1107,8 +1111,19 @@ impl BlockEditorModel {
         let mut defs = super::import::Defs::new();
         super::import::collect_definitions(&parsed, &mut defs);
         let mut blocks = Vec::new();
+        // FORK: a quote pasted at the top level can be a Callout, as on
+        // load; below it, a nested quote is plain.
+        let top_level = self.can_insert_callout();
         for node in parsed.iter() {
             super::import::import_block(node, text, &defs, &mut blocks);
+            if top_level
+                && let (
+                    gpui_kit::base::text::editor_host::BlockNode::Blockquote { span, .. },
+                    Some(block),
+                ) = (node, blocks.last_mut())
+            {
+                super::import::detect_callout(text, *span, block);
+            }
         }
         // Nothing structural (one paragraph, soft line breaks only): plain
         // text, where each line becomes a block as typed.
@@ -1120,8 +1135,11 @@ impl BlockEditorModel {
                         || inline.pieces().any(|(_, mark, _)| mark.code)
             )
         };
+        // FORK: the editor's own paste (`own`, which Insert Markdown uses) takes
+        // a one-paragraph body as blocks too, so a one-paragraph Template inserts.
         if blocks.is_empty()
-            || (blocks.len() == 1
+            || (!own
+                && blocks.len() == 1
                 && blocks[0].kind == BlockKindData::Paragraph
                 && !has_atoms(&blocks[0]))
         {
@@ -1373,6 +1391,7 @@ impl BlockEditorModel {
             // FORK
             EditorCommand::SetCallout(kind) => self.set_callout(kind),
             EditorCommand::InsertCallout(kind) => self.insert_callout(kind),
+            EditorCommand::InsertMarkdown(text) => self.insert_markdown(&text),
             EditorCommand::MoveBlocks { down } => self.move_blocks(down),
             EditorCommand::InsertBlock(BlockKind::HorizontalRule) => {
                 let pos = self
@@ -1773,6 +1792,15 @@ impl BlockEditorModel {
                 .index_in_parent(pos.block)
                 .is_some_and(|(parent, _)| parent == self.doc.root)
         })
+    }
+
+    fn insert_markdown(&mut self, text: &str) -> Result<bool, CommandError> {
+        // FORK: shares `InsertCallout`'s top-level rule, because a pasted
+        // Callout nested below it would lose its type on reload.
+        if !self.can_insert_callout() {
+            return Err(CommandError::Unsupported("markdown here"));
+        }
+        self.paste_block_markdown(text, true)
     }
 
     /// FORK: like `insert_table`, for an empty Callout, after a top-level

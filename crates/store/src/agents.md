@@ -15,6 +15,7 @@ personal/ | work/            # Spaces: fully isolated, never link across them
     project.md               # name, icon (Lucide name), columns (ordered), archived
     tasks/<slug>.md
     notes/<slug>.md
+  templates/<slug>.md        # Templates: starter bodies, not Items
 ```
 
 `personal/` and `work/` are separate Spaces. Nothing in one may reference the
@@ -40,6 +41,12 @@ title: Meeting notes
 created: 2026-01-31
 ```
 
+Template: only a title is needed.
+
+```yaml
+title: Meeting notes
+```
+
 Journal Entry: no required frontmatter. The date comes from the filename.
 
 Project (`project.md`):
@@ -61,9 +68,14 @@ Dates are always `YYYY-MM-DD`. The body after the frontmatter is any Markdown.
 - Link to another Item in the same Space with `[[slug]]`, `[[slug|label]]` or
   `[[slug#heading]]`. Link a Journal Entry by its date, `[[YYYY-MM-DD]]`.
 - Slugs (file and folder names) are stable. Never rename a file when its title
-  changes, because Links point at the slug. New slugs come from the title,
+  changes, because Links point at the slug. The one exception is a Template,
+  which may be renamed when its title changes. New slugs come from the title,
   lowercased with dashes. A Note or Task slug must be unique across the whole
   Space (every Project's Notes and Tasks, archived ones too, and Space-level
   Notes); on a clash add `-2`, `-3`, and so on.
+- A Template is not an Item. Don't link to it. Its slug only has to be unique
+  within `templates/`. Keep any other frontmatter keys on a Template, but they
+  are never copied into new Items. To start a Task or Note from a Template,
+  copy its body, not its frontmatter, into the new Item.
 - Keep frontmatter keys you don't recognise. sett preserves them.
 - The `inbox` Project can't be deleted or archived.

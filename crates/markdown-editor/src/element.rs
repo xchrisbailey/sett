@@ -490,10 +490,10 @@ impl RenderOnce for BlockEditor {
             .on_action(window.listener_for(s, BlockEditorState::on_paste_plain))
             .children(super::table_ui::render_menu(&self.state, cx))
             // FORK: the Insert Menu and Callout type menu popovers.
-            .children(super::insert_menu::render(&self.state, cx))
-            .children(super::callout_menu::render(&self.state, cx))
-            .children(super::language_menu::render(&self.state, cx))
-            .children(super::link_picker::render(&self.state, cx))
+            .children(super::insert_menu::render(&self.state, window, cx))
+            .children(super::callout_menu::render(&self.state, window, cx))
+            .children(super::language_menu::render(&self.state, window, cx))
+            .children(super::link_picker::render(&self.state, window, cx))
             .child(EditorRoot {
                 state: self.state.clone(),
                 child: Some(

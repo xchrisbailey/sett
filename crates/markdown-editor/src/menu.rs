@@ -9,10 +9,12 @@
 
 use gpui::{
     AnyElement, App, Bounds, Context, Entity, Hsla, InteractiveElement as _, IntoElement,
-    ParentElement, Pixels, Point, Role, SharedString, StatefulInteractiveElement as _, Styled,
-    anchored, deferred, div, point, prelude::FluentBuilder as _, px, rems,
+    ParentElement, Pixels, Point, Role, ScrollHandle, SharedString,
+    StatefulInteractiveElement as _, Styled, Window, anchored, deferred, div, linear_color_stop,
+    linear_gradient, point, prelude::FluentBuilder as _, px, rems,
 };
 use gpui_kit::base::TestSupportExt as _;
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _};
 
 use super::{
@@ -25,15 +27,29 @@ const ICON_CHECK: &[u8] = include_bytes!("../assets/icons/check.svg");
 const ANCHOR_GAP: Pixels = px(4.);
 /// The closest a menu comes to the window's edges.
 const WINDOW_MARGIN: Pixels = px(8.);
+/// The tallest a menu grows before it scrolls, if the window has room. It
+/// stops partway through a row (rows are about 1.94rem), so a cut-off row
+/// shows there is more below: macOS hides the scrollbar at rest.
+const MAX_HEIGHT_REMS: f32 = 19.;
 
 /// An open menu: the block it belongs to, its highlighted option and, for a
 /// menu that filters by typed text (the Language Menu), that query. Holding
 /// the query here means it can't outlive the menu.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub(crate) struct OpenMenu {
     pub(crate) block: BlockId,
     pub(crate) highlighted: usize,
     pub(crate) query: String,
+    /// Scroll position of the option list. Living here, it starts at the top
+    /// each time a menu opens.
+    scroll: ScrollHandle,
+    /// The next frame scrolls the highlighted row into view. Set when the
+    /// highlight moves by key (not by hover, which must not fight the wheel).
+    reveal: std::cell::Cell<bool>,
+    /// Whether the last frame was drawn knowing the rows overflow. The scroll
+    /// handle learns its size only after layout, so a menu's first frame
+    /// can't tell; a frame is requested when this and the measure differ.
+    overflow_drawn: std::cell::Cell<bool>,
 }
 
 impl OpenMenu {
@@ -42,7 +58,15 @@ impl OpenMenu {
             block,
             highlighted,
             query: String::new(),
+            scroll: ScrollHandle::new(),
+            reveal: std::cell::Cell::new(highlighted > 0),
+            overflow_drawn: std::cell::Cell::new(false),
         }
+    }
+
+    /// Scroll the highlighted row into view on the next frame.
+    pub(crate) fn reveal_highlighted(&self) {
+        self.reveal.set(true);
     }
 
     /// Move the highlight down (`forward`) or up among `count` options,
@@ -56,6 +80,7 @@ impl OpenMenu {
         } else {
             (self.highlighted + count - 1) % count
         };
+        self.reveal.set(true);
     }
 }
 
@@ -130,6 +155,16 @@ impl BlockEditorState {
     pub(crate) fn close_all_menus(&mut self, cx: &mut Context<Self>) {
         self.close_editor_menus();
         self.close_table_menu(cx);
+    }
+
+    fn open_menu(&self, slot: MenuSlot) -> Option<&OpenMenu> {
+        match slot {
+            MenuSlot::Insert => &self.insert_menu,
+            MenuSlot::Callout => &self.callout_menu,
+            MenuSlot::Language => &self.language_menu,
+            MenuSlot::Link => &self.link_picker,
+        }
+        .as_ref()
     }
 
     pub(crate) fn close_menu(&mut self, slot: MenuSlot, cx: &mut Context<Self>) {
@@ -386,17 +421,66 @@ pub(crate) fn checked_option(
         .into_any_element()
 }
 
+/// A fade over the bottom of the rows, as wide as the popover. It lets
+/// clicks through to the rows beneath.
+fn more_below_fade(background: Hsla) -> impl IntoElement {
+    div()
+        .id("insert-menu-more-below")
+        .test_support()
+        .absolute()
+        .bottom_0()
+        .left_0()
+        .right_0()
+        .h_6()
+        .bg(linear_gradient(
+            180.,
+            linear_color_stop(background.opacity(0.), 0.),
+            linear_color_stop(background, 1.),
+        ))
+}
+
+/// What a popover shows: `header` stays put above the scrolling `rows`, and
+/// `highlighted` is the index in `rows` of the highlighted one, which a key
+/// move scrolls into view.
+pub(crate) struct Content {
+    pub(crate) header: Option<AnyElement>,
+    pub(crate) rows: Vec<AnyElement>,
+    pub(crate) highlighted: Option<usize>,
+}
+
 /// `slot`'s menu as a deferred popover hanging from `at` (window
 /// coordinates), kept inside the window. A click outside closes it.
+///
+/// The popover is capped at `MAX_HEIGHT_REMS` or what the window allows, and
+/// the rows scroll inside it.
 pub(crate) fn popover(
     state: &Entity<BlockEditorState>,
     slot: MenuSlot,
     at: Point<Pixels>,
-    options: impl IntoIterator<Item = AnyElement>,
+    content: Content,
+    window: &Window,
     cx: &App,
 ) -> AnyElement {
     let theme = cx.theme();
     let (id, label) = slot.popover();
+    let scroll = state.read(cx).open_menu(slot).map(|menu| {
+        if menu.reveal.take()
+            && let Some(row) = content.highlighted
+        {
+            menu.scroll.scroll_to_item(row);
+        }
+        let overflows = menu.scroll.max_offset().y > px(0.);
+        // The handle only measures overflow after layout, so redraw once when
+        // the frame just drawn guessed wrong. `request_animation_frame` would
+        // notify the view being rendered, which doesn't redraw this editor.
+        if menu.overflow_drawn.replace(overflows) != overflows {
+            let state = state.clone();
+            window.on_next_frame(move |_, cx| state.update(cx, |_, cx| cx.notify()));
+        }
+        menu.scroll.clone()
+    });
+    let max_height = (window.viewport_size().height - WINDOW_MARGIN * 2.)
+        .min(window.rem_size() * MAX_HEIGHT_REMS);
     let state = state.clone();
     deferred(
         anchored()
@@ -411,6 +495,7 @@ pub(crate) fn popover(
                     .aria_label(label)
                     .occlude()
                     .min_w(rems(15.))
+                    .max_h(max_height)
                     .p_1()
                     .flex()
                     .flex_col()
@@ -423,7 +508,37 @@ pub(crate) fn popover(
                     .on_mouse_down_out(move |_, _, cx| {
                         state.update(cx, |state, cx| state.close_menu(slot, cx));
                     })
-                    .children(options),
+                    .children(content.header)
+                    .child(
+                        // The scrollbar overlays this wrapper rather than the
+                        // scrolling div, or it would scroll away with the rows.
+                        div()
+                            .relative()
+                            .flex()
+                            .flex_col()
+                            .min_h_0()
+                            .child(
+                                div()
+                                    .id((id, 1usize))
+                                    .flex()
+                                    .flex_col()
+                                    .min_h_0()
+                                    .overflow_y_scroll()
+                                    .when_some(scroll.clone(), |this, scroll| {
+                                        this.track_scroll(&scroll)
+                                    })
+                                    .children(content.rows),
+                            )
+                            .when_some(scroll, |this, scroll| {
+                                // macOS hides scrollbars at rest, so a fade
+                                // also says there are more rows below.
+                                let more_below = scroll.max_offset().y > px(0.)
+                                    && scroll.offset().y > -scroll.max_offset().y;
+                                this.vertical_scrollbar(&scroll).when(more_below, |this| {
+                                    this.child(more_below_fade(theme.popover))
+                                })
+                            }),
+                    ),
             ),
     )
     .with_priority(1)

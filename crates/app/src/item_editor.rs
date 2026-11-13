@@ -12,7 +12,7 @@ use gpui_kit::{
     div, prelude::FluentBuilder as _,
 };
 use markdown_editor::{BlockEditor, BlockEditorEvent, BlockEditorState};
-use sett_store::{Date, EditorMode, JournalEntry, LinkTarget, Note, Space};
+use sett_store::{Date, EditorMode, JournalEntry, LinkTarget, Note, Space, Template};
 
 use crate::app_model::AppModel;
 use crate::dates::to_chrono;
@@ -60,12 +60,54 @@ impl ItemRef {
     }
 }
 
+/// What a Template's title box says while it is empty, and what a Template
+/// is called until its title is typed.
+pub(crate) const UNTITLED_TEMPLATE: &str = "Untitled template";
+
+/// What an editor has open. A Template is not an Item: nothing links to it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum EditorTarget {
+    Item(ItemRef),
+    Template { space: Space, slug: String },
+}
+
+impl From<ItemRef> for EditorTarget {
+    fn from(item: ItemRef) -> Self {
+        EditorTarget::Item(item)
+    }
+}
+
+impl EditorTarget {
+    fn space(&self) -> Space {
+        match self {
+            EditorTarget::Item(item) => item.space(),
+            EditorTarget::Template { space, .. } => *space,
+        }
+    }
+
+    fn item(&self) -> Option<&ItemRef> {
+        match self {
+            EditorTarget::Item(item) => Some(item),
+            EditorTarget::Template { .. } => None,
+        }
+    }
+
+    /// The title an empty title box saves as.
+    fn untitled(&self) -> &'static str {
+        match self {
+            EditorTarget::Item(_) => "Untitled",
+            EditorTarget::Template { .. } => UNTITLED_TEMPLATE,
+        }
+    }
+}
+
 /// An Item as read from the index.
 #[derive(Debug, Clone)]
 enum Version {
     Note(Note),
     Journal(JournalEntry),
     Task(sett_store::Task),
+    Template(Template),
 }
 
 impl Version {
@@ -74,6 +116,7 @@ impl Version {
             Version::Note(note) => Some(&note.title),
             Version::Journal(_) => None,
             Version::Task(task) => Some(&task.title),
+            Version::Template(template) => Some(&template.title),
         }
     }
 
@@ -82,6 +125,7 @@ impl Version {
             Version::Note(note) => &note.body,
             Version::Journal(entry) => &entry.body,
             Version::Task(task) => &task.body,
+            Version::Template(template) => &template.body,
         }
     }
 
@@ -96,6 +140,7 @@ impl Version {
             Version::Note(note) => note.frontmatter_error(),
             Version::Journal(entry) => entry.frontmatter_error(),
             Version::Task(task) => task.frontmatter_error(),
+            Version::Template(template) => template.frontmatter_error(),
         }
     }
 }
@@ -108,7 +153,7 @@ impl Version {
 /// after the last one, when another Item is opened, or when sett quits.
 pub(crate) struct ItemEditor {
     model: Entity<AppModel>,
-    item: Option<ItemRef>,
+    target: Option<EditorTarget>,
     /// The file as last read or written, or `None` when there is no file
     /// (yet). An index version that differs from this changed outside sett.
     seen: Option<Version>,
@@ -180,9 +225,7 @@ impl ItemEditor {
                 }
             }),
             cx.subscribe_in(&title, window, |this, _, event: &InputEvent, window, cx| {
-                if let InputEvent::Change = event {
-                    this.edited(window, cx);
-                }
+                this.title_event(event, window, cx)
             }),
             cx.observe_in(&model, window, |this, _, window, cx| this.sync(window, cx)),
             cx.on_app_quit(|this, cx| {
@@ -195,7 +238,7 @@ impl ItemEditor {
         let mode = model.read(cx).editor_mode();
         ItemEditor {
             model,
-            item: None,
+            target: None,
             seen: None,
             base: None,
             body: String::new(),
@@ -211,8 +254,13 @@ impl ItemEditor {
         }
     }
 
+    /// The open Item, or `None` when nothing or a Template is open.
     pub(crate) fn item(&self) -> Option<&ItemRef> {
-        self.item.as_ref()
+        self.target.as_ref()?.item()
+    }
+
+    pub(crate) fn target(&self) -> Option<&EditorTarget> {
+        self.target.as_ref()
     }
 
     /// Whether the open Item's frontmatter can't be read, so it shows read-only
@@ -226,16 +274,26 @@ impl ItemEditor {
         &self.title
     }
 
-    /// Opens `item`, saving the one open before if it has edits. A Journal
+    /// Opens `target`, saving the one open before if it has edits. A Journal
     /// Entry without a file opens empty and stays in memory until typed in.
-    pub(crate) fn open(&mut self, item: ItemRef, window: &mut Window, cx: &mut Context<Self>) {
-        if self.item.as_ref() == Some(&item) {
+    pub(crate) fn open(
+        &mut self,
+        target: impl Into<EditorTarget>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let target = target.into();
+        if self.target.as_ref() == Some(&target) {
             self.apply_reveal(window, cx);
             return;
         }
         self.flush(window, cx);
         self.mode = self.model.read(cx).editor_mode();
-        self.item = Some(item);
+        let placeholder = target.untitled();
+        self.title.update(cx, |title, cx| {
+            title.set_placeholder(placeholder, window, cx)
+        });
+        self.target = Some(target);
         let disk = self.disk_version(cx);
         match disk.clone().or_else(|| self.empty_version()) {
             Some(base) => self.show(disk, base, window, cx),
@@ -257,7 +315,7 @@ impl ItemEditor {
         let LinkTarget::Found { item, .. } = self.model.read(cx).index().resolve(slug) else {
             return;
         };
-        if self.item.as_ref().map(ItemRef::id) == Some(item.clone()) {
+        if self.item().map(ItemRef::id) == Some(item.clone()) {
             if let Some(heading) = heading {
                 self.reveal_heading(heading, window, cx);
             }
@@ -270,7 +328,7 @@ impl ItemEditor {
 
     /// Goes to the heading a followed Link asked for in the Item just opened.
     fn apply_reveal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(item) = self.item.as_ref().map(ItemRef::id) else {
+        let Some(item) = self.item().map(ItemRef::id) else {
             return;
         };
         if let Some(heading) = self.model.update(cx, |model, _| model.take_reveal(&item)) {
@@ -312,7 +370,7 @@ impl ItemEditor {
     }
 
     fn close(&mut self, cx: &mut Context<Self>) {
-        self.item = None;
+        self.target = None;
         self.seen = None;
         self.base = None;
         self.dirty = false;
@@ -321,8 +379,52 @@ impl ItemEditor {
         cx.notify();
     }
 
+    fn title_event(&mut self, event: &InputEvent, window: &mut Window, cx: &mut Context<Self>) {
+        match event {
+            InputEvent::Change => self.edited(window, cx),
+            InputEvent::PressEnter { .. } | InputEvent::Blur => self.commit_title(window, cx),
+            _ => {}
+        }
+    }
+
+    /// A title was committed (Enter, or the title losing focus). A Template's
+    /// file takes its name from the title only now: saving while typing never
+    /// renames it. The editor stays open on the renamed file.
+    fn commit_title(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(EditorTarget::Template { space, slug }) = self.target.clone() else {
+            return;
+        };
+        if self.locked() || self.asking {
+            return;
+        }
+        self.flush(window, cx);
+        let title = self.title_or_untitled(cx);
+        let renamed = self
+            .model
+            .update(cx, |w, _| w.rename_template(space, &slug, &title));
+        match renamed {
+            Ok(new_slug) if new_slug != slug => {
+                // Follow the file before anyone is told it moved, or the
+                // editor would take the old name vanishing for a deletion.
+                self.target = Some(EditorTarget::Template {
+                    space,
+                    slug: new_slug,
+                });
+                let disk = self.disk_version(cx);
+                self.seen = disk.clone();
+                self.base = disk;
+                self.model.update(cx, |_, cx| cx.notify());
+            }
+            Ok(_) => {}
+            Err(err) => window.push_notification(
+                Notification::error(format!("Couldn\u{2019}t rename the Template. {err}.")),
+                cx,
+            ),
+        }
+    }
+
     fn edited(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.item.is_none() || self.locked() {
+        if self.target.is_none() || self.locked() {
             return;
         }
         self.dirty = true;
@@ -360,6 +462,12 @@ impl ItemEditor {
                 model.update(cx, |w, cx| w.save_task(&mut task, cx))?;
                 Version::Task(task)
             }
+            Version::Template(mut template) => {
+                template.title = self.title_or_untitled(cx);
+                template.body = self.body.clone();
+                model.update(cx, |w, cx| w.save_template(&mut template, cx))?;
+                Version::Template(template)
+            }
         };
         self.seen = Some(saved.clone());
         self.base = Some(saved);
@@ -371,7 +479,10 @@ impl ItemEditor {
         let title = self.title.read(cx).value();
         let title = title.trim();
         if title.is_empty() {
-            "Untitled".to_string()
+            self.target
+                .as_ref()
+                .map_or("Untitled", EditorTarget::untitled)
+                .to_string()
         } else {
             title.to_string()
         }
@@ -380,11 +491,11 @@ impl ItemEditor {
     /// Follows the AppModel: the editor mode, a Space switch, and outside
     /// changes to the open Item.
     fn sync(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(item) = self.item.clone() else {
+        let Some(target) = self.target.clone() else {
             return;
         };
         let model = self.model.read(cx);
-        if model.space() != item.space() {
+        if model.space() != target.space() {
             self.flush(window, cx);
             self.close(cx);
             return;
@@ -392,6 +503,7 @@ impl ItemEditor {
         let mode = model.editor_mode();
         // Another Item may have been renamed, added or removed.
         self.refresh_link_data(cx);
+        self.refresh_insert_options(cx);
         if mode != self.mode {
             self.set_mode(mode, window, cx);
         }
@@ -494,7 +606,7 @@ impl ItemEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let project = match &self.item {
+        let project = match self.item() {
             Some(ItemRef::Note { project, .. }) => project.clone(),
             Some(ItemRef::Task { project, .. }) => Some(project.clone()),
             Some(ItemRef::Journal { .. }) | None => None,
@@ -519,17 +631,26 @@ impl ItemEditor {
     /// and states) and which Items the Link Picker offers. The editor
     /// repaints only when the answer differs from the last one.
     fn refresh_link_data(&self, cx: &mut Context<Self>) {
-        let Some(item) = self.item.as_ref().map(ItemRef::id) else {
+        if self.target.is_none() {
             return;
-        };
+        }
+        let item = self.item().map(ItemRef::id);
         let model = self.model.clone();
         self.block.update(cx, |block, cx| {
             let index = model.read(cx).index();
             let directory = crate::link_data::wiki_link_directory(index, block.wiki_link_slugs());
-            let candidates = crate::link_data::link_candidates(index, &item);
+            let candidates = crate::link_data::link_candidates(index, item.as_ref());
             block.set_wiki_links(Arc::new(directory), cx);
             block.set_link_candidates(candidates, cx);
         });
+    }
+
+    /// Offers the Space's Templates after the block types. Takes effect the
+    /// next time the menu opens.
+    fn refresh_insert_options(&self, cx: &mut Context<Self>) {
+        let options = crate::template_options::insert_options(self.model.read(cx).templates());
+        self.block
+            .update(cx, |block, _| block.set_insert_menu_options(options));
     }
 
     fn set_mode(&mut self, mode: EditorMode, window: &mut Window, cx: &mut Context<Self>) {
@@ -562,6 +683,7 @@ impl ItemEditor {
                     eprintln!("sett: couldn't show the block view: {err}");
                 }
                 self.refresh_link_data(cx);
+                self.refresh_insert_options(cx);
             }
             EditorMode::Raw => self
                 .raw
@@ -571,28 +693,31 @@ impl ItemEditor {
 
     fn disk_version(&self, cx: &App) -> Option<Version> {
         let model = self.model.read(cx);
-        let item = self.item.as_ref()?;
-        if model.space() != item.space() {
+        let target = self.target.as_ref()?;
+        if model.space() != target.space() {
             return None;
         }
         let index = model.index();
-        match item {
-            ItemRef::Note { project, slug, .. } => index
+        match target {
+            EditorTarget::Item(ItemRef::Note { project, slug, .. }) => index
                 .note(project.as_deref(), slug)
                 .cloned()
                 .map(Version::Note),
-            ItemRef::Journal { date, .. } => {
+            EditorTarget::Item(ItemRef::Journal { date, .. }) => {
                 index.journal_entry(*date).cloned().map(Version::Journal)
             }
-            ItemRef::Task { project, slug, .. } => {
+            EditorTarget::Item(ItemRef::Task { project, slug, .. }) => {
                 index.task(project, slug).cloned().map(Version::Task)
+            }
+            EditorTarget::Template { slug, .. } => {
+                model.template(slug).cloned().map(Version::Template)
             }
         }
     }
 
     /// A Journal Entry with no file is simply empty; a Note or Task must exist.
     fn empty_version(&self) -> Option<Version> {
-        match self.item.as_ref()? {
+        match self.item()? {
             ItemRef::Journal { space, date } => {
                 Some(Version::Journal(JournalEntry::new(*space, *date)))
             }
@@ -671,26 +796,34 @@ fn report(err: io::Error, window: &mut Window, cx: &mut App) {
 
 impl Render for ItemEditor {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let Some(item) = &self.item else {
+        let Some(target) = &self.target else {
             return div().into_any_element();
         };
-        let header = match item {
-            ItemRef::Note { .. } => div().px_6().pt_4().child(
-                Input::new(&self.title)
-                    .id("note-title")
-                    .readonly(self.locked())
-                    .appearance(false)
-                    .large()
-                    .text_xl()
-                    .font_semibold(),
-            ),
-            ItemRef::Journal { date, .. } => div()
+        let header = match target {
+            EditorTarget::Item(ItemRef::Note { .. }) | EditorTarget::Template { .. } => {
+                div().px_6().pt_4().child(
+                    Input::new(&self.title)
+                        .id("note-title")
+                        .readonly(self.locked())
+                        .appearance(false)
+                        .large()
+                        .text_xl()
+                        .font_semibold(),
+                )
+            }
+            EditorTarget::Item(ItemRef::Journal { date, .. }) => div()
                 .px_8()
                 .pt_4()
                 .text_sm()
                 .text_color(cx.theme().muted_foreground)
                 .child(format_date(*date)),
-            ItemRef::Task { .. } => div(),
+            EditorTarget::Item(ItemRef::Task { .. }) => div(),
+        };
+        let links = match target {
+            EditorTarget::Item(item) => ItemLinks::new(self.model.clone(), item.id()),
+            EditorTarget::Template { .. } => {
+                ItemLinks::for_template(self.model.clone(), self.body.clone())
+            }
         };
         v_flex()
             .size_full()
@@ -700,7 +833,7 @@ impl Render for ItemEditor {
                 editor.child(div().px_6().pt_2().child(frontmatter_notice()))
             })
             .child(self.render_body(cx))
-            .child(ItemLinks::new(self.model.clone(), item.id()))
+            .child(links)
             .into_any_element()
     }
 }

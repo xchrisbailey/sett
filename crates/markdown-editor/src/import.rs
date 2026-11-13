@@ -263,7 +263,8 @@ pub(crate) fn import_block(
 /// The line is read from the source, so an escaped `\[!NOTE]` or text after
 /// the marker keeps the quote plain. gpui-kit's `block_surface` would detect
 /// this too, but its `Surface` nodes import as `Unknown` and save as nothing.
-fn detect_callout(source: &str, span: Option<Span>, block: &mut DetachedBlock) {
+// FORK: `pub(crate)` so a pasted quote can be checked too (`command.rs`).
+pub(crate) fn detect_callout(source: &str, span: Option<Span>, block: &mut DetachedBlock) {
     let Some(line) = span
         .and_then(|span| source.get(span.start..))
         .and_then(|rest| rest.lines().next())

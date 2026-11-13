@@ -5,6 +5,7 @@
 //! the explicit `create_*`, `save_*` and `trash_*` calls, so callers control
 //! that an Item is written only after it was edited (ADR 0003).
 
+mod agents;
 mod board;
 mod callout;
 mod date;
@@ -29,7 +30,7 @@ pub use callout::{CalloutKind, TaskCallout};
 pub use date::Date;
 use frontmatter::Document;
 pub use index::{Change, SpaceIndex, Update};
-pub use item::{JournalEntry, Note, RECENT_DONE_DAYS, Task};
+pub use item::{JournalEntry, Note, RECENT_DONE_DAYS, Task, Template};
 pub use links::{InboundLink, ItemId, Link, LinkTarget};
 pub use settings::{EditorMode, Settings};
 pub use watch::Watcher;
@@ -38,7 +39,6 @@ use watch::WriteLog;
 pub const INBOX_SLUG: &str = "inbox";
 const DEFAULT_ICON: &str = "folder";
 const DEFAULT_COLUMNS: [&str; 3] = ["Todo", "Doing", "Done"];
-const AGENTS_MD: &str = include_str!("agents.md");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -147,6 +147,14 @@ impl Store {
         if !store.root.exists() {
             store.first_run()?;
         }
+        // AGENTS.md is a courtesy for other tools; a read-only or unwritable
+        // one must not stop sett launching.
+        if let Err(err) = agents::sync(&store.root) {
+            eprintln!(
+                "sett: couldn't update AGENTS.md in {}: {err}",
+                store.root.display()
+            );
+        }
         Ok(store)
     }
 
@@ -175,10 +183,6 @@ impl Store {
             inbox.name = "Inbox".to_string();
             inbox.icon = Some("inbox".to_string());
             self.write_project(&inbox)?;
-        }
-        let agents = self.root.join("AGENTS.md");
-        if !agents.exists() {
-            fs::write(agents, AGENTS_MD)?;
         }
         Ok(())
     }
@@ -256,6 +260,24 @@ impl Store {
                     .with_modified(modified(&dir.join(md(&slug))))
             })
             .collect()
+    }
+
+    /// A Space's Templates, sorted by title.
+    pub fn templates(&self, space: Space) -> Vec<Template> {
+        let mut templates: Vec<Template> = markdown_files(&self.templates_dir(space))
+            .into_iter()
+            .map(|(slug, doc)| Template::from_doc(space, &slug, doc))
+            .collect();
+        templates.sort_by_cached_key(|t| (t.title.to_lowercase(), t.slug.clone()));
+        templates
+    }
+
+    pub fn template(&self, space: Space, slug: &str) -> Option<Template> {
+        if !slug::is_safe(slug) {
+            return None;
+        }
+        let path = self.templates_dir(space).join(md(slug));
+        Some(Template::from_doc(space, slug, read_doc(&path)?))
     }
 
     /// Journal Entries sorted by date. Files whose name isn't a valid
@@ -422,6 +444,56 @@ impl Store {
         Ok(note)
     }
 
+    /// Creates an empty Template, making `templates/` on first use. Its slug
+    /// only has to be unique among Templates: they aren't Items, so no Link
+    /// can be ambiguous with them.
+    pub fn create_template(&self, space: Space, title: &str) -> io::Result<Template> {
+        let dir = self.templates_dir(space);
+        let slug = self.template_slug(&dir, title, None);
+        let mut template = Template::from_doc(space, &slug, Document::default());
+        template.title = title.to_string();
+        self.write_new(&dir, &slug, template.to_doc())?;
+        template.fields = template.to_doc().fields;
+        Ok(template)
+    }
+
+    /// Moves a Template to a fresh slug made from `new_title` and returns it,
+    /// or returns the current slug when it wouldn't change. Saving never
+    /// renames, so the app calls this when a title is committed.
+    pub fn rename_template(&self, space: Space, slug: &str, new_title: &str) -> io::Result<String> {
+        check_slug(slug)?;
+        let dir = self.templates_dir(space);
+        let from = dir.join(md(slug));
+        if !from.is_file() {
+            return Err(not_found(format!("template {slug}")));
+        }
+        let new_slug = self.template_slug(&dir, new_title, Some(slug));
+        if new_slug == slug {
+            return Ok(new_slug);
+        }
+        let to = dir.join(md(&new_slug));
+        // `rename` would replace a file that appeared since the slug was picked.
+        if to.exists() {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!("{} already exists", to.display()),
+            ));
+        }
+        let content = fs::read(&from)?;
+        self.log.removed(self.rel(&from), &from);
+        self.log.file(self.rel(&to), &content);
+        fs::rename(&from, &to)?;
+        Ok(new_slug)
+    }
+
+    fn template_slug(&self, dir: &Path, title: &str, own: Option<&str>) -> String {
+        let taken: HashSet<String> = markdown_stems(dir)
+            .into_iter()
+            .filter(|s| Some(s.as_str()) != own)
+            .collect();
+        slug::unique_slug(&slug::slugify(title), |s| taken.contains(s))
+    }
+
     /// A slug from `title` that no Note or Task anywhere in the Space has,
     /// archived Projects included, so a Link to it is never ambiguous.
     /// Date-shaped slugs are left to Journal Entries.
@@ -472,6 +544,15 @@ impl Store {
         Ok(())
     }
 
+    pub fn save_template(&self, template: &mut Template) -> io::Result<()> {
+        check_slug(&template.slug)?;
+        let doc = template.to_doc();
+        let path = self.templates_dir(template.space).join(md(&template.slug));
+        self.write_doc(&path, &doc)?;
+        template.fields = doc.fields;
+        Ok(())
+    }
+
     pub fn save_journal_entry(&self, entry: &mut JournalEntry) -> io::Result<()> {
         let doc = entry.to_doc();
         let path = self.journal_path(entry);
@@ -507,6 +588,11 @@ impl Store {
                 .notes_dir(note.space, note.project.as_deref())
                 .join(md(&note.slug)),
         )
+    }
+
+    pub fn trash_template(&self, template: &Template) -> io::Result<()> {
+        check_slug(&template.slug)?;
+        self.trash(&self.templates_dir(template.space).join(md(&template.slug)))
     }
 
     pub fn trash_journal_entry(&self, entry: &JournalEntry) -> io::Result<()> {
@@ -595,6 +681,10 @@ impl Store {
             Some(p) => self.project_dir(space, p).join("notes"),
             None => self.space_dir(space).join("notes"),
         }
+    }
+
+    fn templates_dir(&self, space: Space) -> PathBuf {
+        self.space_dir(space).join("templates")
     }
 
     fn journal_dir(&self, space: Space) -> PathBuf {

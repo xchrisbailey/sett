@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use gpui_kit::{App, AppContext as _, Context, Entity, EventEmitter, Task};
 use sett_store::{
     Board, Change, Date, EditorMode, INBOX_SLUG, ItemId, JournalEntry, Note, Project, Settings,
-    Space, SpaceIndex, Store, Update, Watcher,
+    Space, SpaceIndex, Store, Template, Update, Watcher,
 };
 
 use crate::dates::today;
@@ -15,6 +15,7 @@ use crate::dates::today;
 pub enum Selection {
     Journal,
     Notes,
+    Templates,
     /// A Project, by slug.
     Project(String),
 }
@@ -41,6 +42,9 @@ pub struct AppModel {
     settings: Settings,
     settings_path: Option<PathBuf>,
     index: SpaceIndex,
+    /// The active Space's Templates, sorted by title. They aren't Items, so
+    /// the index doesn't hold them; this is re-read on a Template change.
+    templates: Vec<Template>,
     selections: HashMap<Space, Selection>,
     /// The Item open in each Space, reopened when switching back to it.
     open_items: HashMap<Space, ItemId>,
@@ -98,11 +102,13 @@ impl AppModel {
             let space = settings.last_space;
             let watching = watched.then(|| watch(&store, space, cx)).flatten();
             let index = SpaceIndex::scan(&store, space);
+            let templates = store.templates(space);
             AppModel {
                 store,
                 settings,
                 settings_path,
                 index,
+                templates,
                 selections: HashMap::new(),
                 open_items: HashMap::new(),
                 histories: HashMap::new(),
@@ -118,6 +124,14 @@ impl AppModel {
 
     pub fn index(&self) -> &SpaceIndex {
         &self.index
+    }
+
+    pub fn templates(&self) -> &[Template] {
+        &self.templates
+    }
+
+    pub fn template(&self, slug: &str) -> Option<&Template> {
+        self.templates.iter().find(|t| t.slug == slug)
     }
 
     pub fn selection(&self) -> Selection {
@@ -243,6 +257,7 @@ impl AppModel {
             self.watching = watch(&self.store, space, cx);
         }
         self.index = SpaceIndex::scan(&self.store, space);
+        self.templates = self.store.templates(space);
         self.fix_selection();
         self.save_last_space(space);
         let reopen = self
@@ -406,12 +421,72 @@ impl AppModel {
         Ok(())
     }
 
+    pub fn create_template(&mut self, title: &str, cx: &mut Context<Self>) -> io::Result<String> {
+        let template = self.store.create_template(self.space(), title)?;
+        self.apply_change(Change::Template(template.slug.clone()), cx);
+        Ok(template.slug)
+    }
+
+    /// Writes a Template without renaming it. It may belong to a Space that is
+    /// no longer active when an edit is saved on the way out of it.
+    pub fn save_template(
+        &mut self,
+        template: &mut Template,
+        cx: &mut Context<Self>,
+    ) -> io::Result<()> {
+        self.store.save_template(template)?;
+        if template.space == self.space() {
+            self.apply_change(Change::Template(template.slug.clone()), cx);
+        }
+        Ok(())
+    }
+
+    /// Moves a Template's file to a slug made from `title`, once the title is
+    /// committed. Returns the slug, which is the old one if nothing changed.
+    ///
+    /// Doesn't notify, so that the editor open on the Template can follow it
+    /// to the new slug first; the caller notifies afterwards.
+    pub fn rename_template(&mut self, space: Space, slug: &str, title: &str) -> io::Result<String> {
+        let new_slug = self.store.rename_template(space, slug, title)?;
+        if new_slug != slug && space == self.space() {
+            self.reload_templates();
+        }
+        Ok(new_slug)
+    }
+
+    pub fn trash_template(&mut self, slug: &str, cx: &mut Context<Self>) -> io::Result<()> {
+        let template = self.template(slug).cloned().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("template {slug} not found"),
+            )
+        })?;
+        self.store.trash_template(&template)?;
+        self.apply_change(Change::Template(slug.to_string()), cx);
+        Ok(())
+    }
+
     /// Brings the active Space's index in line with an outside change to it.
     pub fn apply_change(&mut self, change: Change, cx: &mut Context<Self>) {
+        if matches!(change, Change::Template(_) | Change::Templates) {
+            if self.reload_templates() {
+                cx.notify();
+            }
+            return;
+        }
         if self.index.apply(&self.store, &change) != Update::Unchanged {
             self.fix_selection();
             cx.notify();
         }
+    }
+
+    /// Re-reads the active Space's Templates, which come back sorted. Returns
+    /// whether any differ.
+    fn reload_templates(&mut self) -> bool {
+        let fresh = self.store.templates(self.space());
+        let changed = fresh != self.templates;
+        self.templates = fresh;
+        changed
     }
 
     /// Quick-adds a Task at the top of a Column of the Project's Board.
