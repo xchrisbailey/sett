@@ -4,7 +4,7 @@
 
 use gpui_kit::base::text::MarkdownExtensions;
 use markdown_editor::{BlockEditorModel, BlockKind, BlockRef, CalloutKind};
-use sett_store::{CalloutType, Date, Space, Store, Task};
+use sett_store::{CalloutKind as TaskCalloutKind, Date, Space, Store, Task};
 
 fn task_with_body(body: &str) -> Task {
     let dir = tempfile::tempdir().unwrap();
@@ -22,15 +22,15 @@ fn task_with_body(body: &str) -> Task {
 }
 
 #[test]
-fn every_callout_type_maps_to_the_editors_kind_by_name_and_back() {
-    for ty in CalloutType::ALL {
-        let kind = CalloutKind::from_marker(ty.marker()).expect("editor knows the type");
-        assert_eq!(kind.marker(), ty.marker());
-        assert_eq!(CalloutType::from_marker(kind.marker()), Some(ty));
+fn every_callout_kind_maps_to_the_editors_kind_by_name_and_back() {
+    for task_kind in TaskCalloutKind::ALL {
+        let kind = CalloutKind::from_marker(task_kind.marker()).expect("editor knows the kind");
+        assert_eq!(kind.marker(), task_kind.marker());
+        assert_eq!(TaskCalloutKind::from_marker(kind.marker()), Some(task_kind));
     }
-    assert_eq!(CalloutType::ALL.len(), CalloutKind::ALL.len());
+    assert_eq!(TaskCalloutKind::ALL.len(), CalloutKind::ALL.len());
     for kind in CalloutKind::ALL {
-        assert!(CalloutType::from_marker(kind.marker()).is_some());
+        assert!(TaskCalloutKind::from_marker(kind.marker()).is_some());
     }
 }
 
@@ -75,6 +75,8 @@ const SAMPLES: &[&str] = &[
     "> [!NOTE]\n> a\n\n> [!TIP]\n> b\n",
     "- item\n> [!NOTE]\n> after list\n",
     "> [!NOTE]\nlazy\n",
+    "- item\nlazy\n  > [!NOTE]\n  > x\n",
+    "1. item\nlazy\n   > [!NOTE]\n   > x\n\n> [!TIP]\n> out\n",
     "> [!NOTE]\n> para\n>\n> - a\n> - b\n>\n> ```\n> code\n> ```\n",
     "---\ntitle: x\n---\n\n> [!TIP]\n> after rule\n",
     "> [!FOO]\n> unknown\n",

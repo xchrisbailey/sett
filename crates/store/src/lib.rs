@@ -25,7 +25,7 @@ use std::sync::Arc;
 use serde_yaml_ng::{Mapping, Value};
 
 pub use board::{Board, BoardColumn, MIN_COLUMNS};
-pub use callout::{CalloutType, TaskCallout};
+pub use callout::{CalloutKind, TaskCallout};
 pub use date::Date;
 use frontmatter::Document;
 pub use index::{Change, SpaceIndex, Update};

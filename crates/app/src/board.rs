@@ -18,7 +18,7 @@ use gpui_kit::{
     TestSupportExt as _, Window, actions, div, prelude::FluentBuilder as _, px,
 };
 use markdown_editor::CalloutKind;
-use sett_store::{Board, BoardColumn, Date, Task, TaskCallout};
+use sett_store::{Board, BoardColumn, CalloutKind as TaskCalloutKind, Date, Task, TaskCallout};
 
 use crate::app_model::{AppModel, Selection};
 use crate::confirm_delete::{ITEM_CONSEQUENCE, confirm_delete};
@@ -644,22 +644,28 @@ impl BoardView {
 /// How many lines of a Callout a Card shows, hard breaks included.
 const CARD_CALLOUT_LINES: usize = 2;
 
-fn callout_kind(callout: &TaskCallout) -> CalloutKind {
-    // The store and the editor name the types alike; their test keeps them so.
-    CalloutKind::from_marker(callout.kind.marker()).expect("the editor knows every Callout type")
+/// The editor's kind for the store's. Spelled out so a new kind on either
+/// side fails to compile here instead of panicking while drawing a Card.
+fn callout_kind(kind: TaskCalloutKind) -> CalloutKind {
+    match kind {
+        TaskCalloutKind::Note => CalloutKind::Note,
+        TaskCalloutKind::Tip => CalloutKind::Tip,
+        TaskCalloutKind::Important => CalloutKind::Important,
+        TaskCalloutKind::Warning => CalloutKind::Warning,
+        TaskCalloutKind::Caution => CalloutKind::Caution,
+    }
 }
 
 /// What a Card's accessible description says about its Callout:
 /// `<Type>: <first two lines joined with a space>`, with "\u{2026}" when more follow.
 fn callout_description(callout: &TaskCallout) -> String {
-    let shown = callout.lines.iter().take(CARD_CALLOUT_LINES);
-    let text = shown.map(String::as_str).collect::<Vec<_>>().join(" ");
-    let more = if callout.lines.len() > CARD_CALLOUT_LINES {
-        "\u{2026}"
-    } else {
-        ""
-    };
-    format!("{}: {text}{more}", callout_kind(callout).label())
+    let (shown, more) = callout.shown(CARD_CALLOUT_LINES);
+    let ellipsis = if more { "\u{2026}" } else { "" };
+    format!(
+        "{}: {}{ellipsis}",
+        callout_kind(callout.kind).label(),
+        shown.join(" ")
+    )
 }
 
 /// The quiet line under a Card's title: the type's icon in its colour, then
@@ -667,35 +673,29 @@ fn callout_description(callout: &TaskCallout) -> String {
 /// ellipsis when cut. `line_clamp` counts again after each hard break, so a
 /// Callout of several lines is drawn one line at a time instead.
 fn callout_line(callout: &TaskCallout, cx: &App) -> impl IntoElement + use<> {
-    let kind = callout_kind(callout);
+    let kind = callout_kind(callout.kind);
     let color = markdown_editor::callout_color(kind, cx);
     let muted = cx.theme().muted_foreground;
-    let text =
-        match callout.lines.as_slice() {
-            [only] => div()
-                .text_ellipsis()
-                .line_clamp(CARD_CALLOUT_LINES)
-                .child(only.clone())
-                .into_any_element(),
-            lines => {
-                let last = CARD_CALLOUT_LINES - 1;
-                v_flex()
-                    .children(lines.iter().take(CARD_CALLOUT_LINES).enumerate().map(
-                        |(ix, line)| {
-                            // Cut after the last visible line: the ellipsis is
-                            // the text's own when more lines follow.
-                            let cut = ix == last && lines.len() > CARD_CALLOUT_LINES;
-                            let line = if cut {
-                                format!("{line}\u{2026}")
-                            } else {
-                                line.clone()
-                            };
-                            div().truncate().child(line)
-                        },
-                    ))
-                    .into_any_element()
-            }
-        };
+    let (shown, more) = callout.shown(CARD_CALLOUT_LINES);
+    let text = match shown {
+        [only] if !more => div()
+            .text_ellipsis()
+            .line_clamp(CARD_CALLOUT_LINES)
+            .child(only.clone())
+            .into_any_element(),
+        lines => v_flex()
+            .children(lines.iter().enumerate().map(|(ix, line)| {
+                // Cut after the last visible line: the ellipsis is the text's
+                // own when more lines follow.
+                let line = if more && ix + 1 == lines.len() {
+                    format!("{line}\u{2026}")
+                } else {
+                    line.clone()
+                };
+                div().truncate().child(line)
+            }))
+            .into_any_element(),
+    };
     h_flex()
         .items_start()
         .gap_1()
