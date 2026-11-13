@@ -3203,6 +3203,7 @@ fn command_name(command: &EditorCommand) -> &'static str {
         // FORK
         EditorCommand::SetCallout(_) => "set_callout",
         EditorCommand::InsertCallout(_) => "insert_callout",
+        EditorCommand::InsertMarkdown(_) => "insert_markdown",
         EditorCommand::SetTaskChecked(_) => "set_task_checked",
         EditorCommand::Indent => "indent",
         EditorCommand::Outdent => "outdent",
