@@ -268,3 +268,69 @@ fn one_undo_reverts_a_callout_pick_to_the_typed_text(cx: &mut TestAppContext) {
     assert!(!menu_open(cx, &f));
     assert_eq!(saved_body(cx, &path), "First line\n\n/warn\n");
 }
+
+/// Writes Templates into the personal Space and tells the app.
+fn add_template(cx: &mut TestAppContext, f: &Fixture, slug: &str, title: &str, body: &str) {
+    let dir = f.data_root.join("personal/templates");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join(format!("{slug}.md")),
+        format!("---\ntitle: {title}\nmood: calm\n---\n{body}"),
+    )
+    .unwrap();
+    let model = f.model(cx);
+    cx.update(|cx| {
+        model.update(cx, |m, cx| {
+            m.apply_change(Change::Template(slug.into()), cx)
+        })
+    });
+    cx.run_until_parked();
+}
+
+#[gpui_kit::test]
+fn picking_a_template_replaces_the_slash_with_its_body(cx: &mut TestAppContext) {
+    let (f, path) = on_a_new_line(cx);
+    add_template(cx, &f, "standup", "Standup", "## Yesterday\n\nDone\n");
+    add_template(cx, &f, "retro", "Retro", "## Went well\n");
+    input(cx, &f, "/stand");
+    assert!(has_label(cx, &f, "Standup") && !has_label(cx, &f, "Retro"));
+    press(cx, &f, "enter");
+    assert!(!menu_open(cx, &f));
+    let saved = fs::read_to_string({
+        cx.executor().advance_clock(AFTER_AUTOSAVE);
+        cx.run_until_parked();
+        &path
+    })
+    .unwrap();
+    assert_eq!(
+        saved,
+        "---\ntitle: Plan\n---\nFirst line\n\n## Yesterday\n\nDone\n"
+    );
+    // One undo restores the typed text.
+    press(cx, &f, "secondary-z");
+    assert_eq!(saved_body(cx, &path), "First line\n\n/stand\n");
+}
+
+#[gpui_kit::test]
+fn a_template_added_on_disk_shows_the_next_time_the_menu_opens(cx: &mut TestAppContext) {
+    let (f, _) = on_a_new_line(cx);
+    input(cx, &f, "/");
+    assert!(menu_open(cx, &f));
+    // Only the block types: nothing to pick after Divider.
+    assert!(has_label(cx, &f, "Divider") && !has_label(cx, &f, "Standup"));
+    press(cx, &f, "escape backspace");
+
+    add_template(cx, &f, "standup", "Standup", "Body\n");
+    input(cx, &f, "/");
+    assert!(has_label(cx, &f, "Standup"));
+}
+
+#[gpui_kit::test]
+fn templates_are_not_offered_inside_a_list_item(cx: &mut TestAppContext) {
+    let (f, _) = on_a_new_line(cx);
+    add_template(cx, &f, "standup", "Standup", "Body\n");
+    input(cx, &f, "- /");
+    assert!(menu_open(cx, &f));
+    assert!(has_label(cx, &f, "Heading 1"));
+    assert!(!has_label(cx, &f, "Standup"));
+}

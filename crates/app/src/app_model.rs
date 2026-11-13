@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use gpui_kit::{App, AppContext as _, Context, Entity, EventEmitter, Task};
 use sett_store::{
     Board, Change, Date, EditorMode, INBOX_SLUG, ItemId, JournalEntry, Note, Project, Settings,
-    Space, SpaceIndex, Store, Update, Watcher,
+    Space, SpaceIndex, Store, Template, Update, Watcher,
 };
 
 use crate::dates::today;
@@ -114,6 +114,11 @@ impl AppModel {
 
     pub fn space(&self) -> Space {
         self.index.space()
+    }
+
+    /// The active Space's Templates, sorted by title, read from disk.
+    pub fn templates(&self) -> Vec<Template> {
+        self.store.templates(self.space())
     }
 
     pub fn index(&self) -> &SpaceIndex {
@@ -408,6 +413,10 @@ impl AppModel {
 
     /// Brings the active Space's index in line with an outside change to it.
     pub fn apply_change(&mut self, change: Change, cx: &mut Context<Self>) {
+        // The index holds no Templates; observers re-read them.
+        if matches!(change, Change::Template(_) | Change::Templates) {
+            cx.notify();
+        }
         if self.index.apply(&self.store, &change) != Update::Unchanged {
             self.fix_selection();
             cx.notify();

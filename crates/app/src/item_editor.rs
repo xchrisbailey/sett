@@ -392,6 +392,7 @@ impl ItemEditor {
         let mode = model.editor_mode();
         // Another Item may have been renamed, added or removed.
         self.refresh_link_data(cx);
+        self.refresh_insert_options(cx);
         if mode != self.mode {
             self.set_mode(mode, window, cx);
         }
@@ -532,6 +533,14 @@ impl ItemEditor {
         });
     }
 
+    /// Offers the Space's Templates after the block types. Takes effect the
+    /// next time the menu opens.
+    fn refresh_insert_options(&self, cx: &mut Context<Self>) {
+        let options = crate::template_options::insert_options(&self.model.read(cx).templates());
+        self.block
+            .update(cx, |block, cx| block.set_insert_menu_options(options, cx));
+    }
+
     fn set_mode(&mut self, mode: EditorMode, window: &mut Window, cx: &mut Context<Self>) {
         let focused = self.active_focus_handle(cx).contains_focused(window, cx);
         self.mode = mode;
@@ -562,6 +571,7 @@ impl ItemEditor {
                     eprintln!("sett: couldn't show the block view: {err}");
                 }
                 self.refresh_link_data(cx);
+                self.refresh_insert_options(cx);
             }
             EditorMode::Raw => self
                 .raw

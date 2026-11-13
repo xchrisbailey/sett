@@ -16,6 +16,7 @@ mod notice;
 mod project_dialog;
 mod shell;
 mod task_view;
+mod template_options;
 
 pub use app_model::{AppModel, AppModelEvent, Selection};
 pub use board::BoardEvent;
