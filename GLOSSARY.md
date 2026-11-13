@@ -71,3 +71,7 @@ _Avoid_: Slash menu, command palette, block picker
 **Journal Entry**:
 A Note tied to a single calendar date within a Space. Each Space keeps its own Journal.
 _Avoid_: Daily note, log, diary
+
+**Template**:
+A named starter body, kept per Space, that a new Task or Note can begin from. A Template is not an Item: it can't be linked to and doesn't appear among Notes or in search.
+_Avoid_: Snippet, boilerplate, preset, blueprint
