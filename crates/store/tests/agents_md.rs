@@ -106,3 +106,40 @@ fn unmarked_user_edited_file_gets_the_block_appended() {
     Store::open(root).unwrap();
     assert_eq!(marked_block(&agents(root)), again);
 }
+
+#[test]
+fn unwritable_file_does_not_stop_the_store_opening() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let stale = format!("{BEGIN}\nold wording\n{END}\n");
+    let path = root.join("AGENTS.md");
+    fs::write(&path, &stale).unwrap();
+    let mut perms = fs::metadata(&path).unwrap().permissions();
+    perms.set_readonly(true);
+    fs::set_permissions(&path, perms).unwrap();
+
+    Store::open(root).expect("a stale, unwritable AGENTS.md must not abort open");
+
+    assert_eq!(agents(root), stale);
+}
+
+#[test]
+fn crlf_files_keep_crlf_endings_when_the_block_is_written() {
+    let stale = format!("my intro\r\n\r\n{BEGIN}\r\nold wording\r\n{END}\r\n\r\nmy outro\r\n");
+    let appended = "my own notes\r\n".to_string();
+    for existing in [stale, appended] {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::write(root.join("AGENTS.md"), existing).unwrap();
+
+        Store::open(root).unwrap();
+
+        let text = agents(root);
+        assert!(text.contains("templates/<slug>.md"));
+        assert_eq!(
+            text.replace("\r\n", "").matches('\n').count(),
+            0,
+            "{text:?}"
+        );
+    }
+}

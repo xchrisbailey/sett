@@ -18,7 +18,13 @@ fn block() -> String {
 
 /// What `AGENTS.md` should contain, or `None` when it is already right.
 fn updated(existing: &str) -> Option<String> {
-    let current = block();
+    // A CRLF file stays CRLF, or the block would leave it with mixed endings.
+    let eol = if existing.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
+    let current = block().replace('\n', eol);
     let next = match (existing.find(BEGIN), existing.find(END)) {
         (Some(start), Some(end)) if start < end => {
             let end = end + END.len();
@@ -35,7 +41,8 @@ fn updated(existing: &str) -> Option<String> {
         _ => {
             let mut text = existing.trim_end().to_string();
             if !text.is_empty() {
-                text.push_str("\n\n");
+                text.push_str(eol);
+                text.push_str(eol);
             }
             text + &current
         }

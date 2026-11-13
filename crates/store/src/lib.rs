@@ -147,7 +147,14 @@ impl Store {
         if !store.root.exists() {
             store.first_run()?;
         }
-        agents::sync(&store.root)?;
+        // AGENTS.md is a courtesy for other tools; a read-only or unwritable
+        // one must not stop sett launching.
+        if let Err(err) = agents::sync(&store.root) {
+            eprintln!(
+                "sett: couldn't update AGENTS.md in {}: {err}",
+                store.root.display()
+            );
+        }
         Ok(store)
     }
 
