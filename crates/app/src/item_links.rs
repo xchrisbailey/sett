@@ -203,8 +203,9 @@ fn key(item: &ItemId) -> String {
 }
 
 impl ItemRef {
-    pub(crate) fn id(&self) -> ItemId {
-        match self {
+    /// The Item being edited, or `None` for a Template.
+    pub(crate) fn id(&self) -> Option<ItemId> {
+        Some(match self {
             ItemRef::Note { project, slug, .. } => ItemId::Note {
                 project: project.clone(),
                 slug: slug.clone(),
@@ -214,6 +215,7 @@ impl ItemRef {
                 project: project.clone(),
                 slug: slug.clone(),
             },
-        }
+            ItemRef::Template { .. } => return None,
+        })
     }
 }

@@ -17,6 +17,7 @@ mod project_dialog;
 mod shell;
 mod task_view;
 mod template_options;
+mod templates;
 
 pub use app_model::{AppModel, AppModelEvent, Selection};
 pub use board::BoardEvent;
@@ -34,4 +35,5 @@ pub fn init(cx: &mut gpui_kit::App) {
     notes::init(cx);
     shell::init(cx);
     task_view::init(cx);
+    templates::init(cx);
 }
