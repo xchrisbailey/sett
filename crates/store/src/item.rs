@@ -2,6 +2,7 @@ use std::time::SystemTime;
 
 use serde_yaml_ng::Mapping;
 
+use crate::callout::{self, TaskCallout};
 use crate::frontmatter::Document;
 use crate::{Date, Space};
 
@@ -107,6 +108,13 @@ impl Task {
             }
         }
         (total > 0).then_some((checked, total))
+    }
+
+    /// The first Callout in the body that has text, as plain text for the
+    /// Card, or `None`. Top level only (not in a list item, another quote or
+    /// code) with the marker alone on its line; an empty Callout is skipped.
+    pub fn first_callout(&self) -> Option<TaskCallout> {
+        callout::first_callout(&self.body)
     }
 
     /// Whether the Task shows in the last Column without "show all": it has
