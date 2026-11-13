@@ -95,7 +95,12 @@ impl TemplatesView {
         }
     }
 
-    fn open_template(&mut self, slug: &str, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn open_template(
+        &mut self,
+        slug: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let space = self.model.read(cx).space();
         let target = EditorTarget::Template {
             space,

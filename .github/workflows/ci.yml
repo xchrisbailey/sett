@@ -23,3 +23,5 @@ jobs:
       - run: scripts/check-fork-markers
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+      # The forked editor's view tests sit behind a feature; see docs/agents/gpui-kit-notes.md.
+      - run: cargo test -p gpui-kit-markdown-editor --features view-tests,gpui-kit/test-support

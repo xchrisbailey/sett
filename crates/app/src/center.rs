@@ -53,8 +53,12 @@ impl CenterPanel {
             cx.notify();
         });
         let open_item = cx.subscribe_in(&model, window, |this, _, event, window, cx| {
-            let AppModelEvent::OpenItem(item) = event;
-            this.open_item(item.clone(), window, cx);
+            match event {
+                AppModelEvent::OpenItem(item) => this.open_item(item.clone(), window, cx),
+                AppModelEvent::OpenTemplate(slug) => this
+                    .templates
+                    .update(cx, |view, cx| view.open_template(slug, window, cx)),
+            }
             cx.notify();
         });
         let board = cx.new(|cx| BoardView::new(model.clone(), window, cx));

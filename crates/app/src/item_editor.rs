@@ -19,6 +19,10 @@ use crate::dates::to_chrono;
 use crate::item_links::ItemLinks;
 use crate::notice::frontmatter_notice;
 
+pub(crate) struct OpenInsertMenuOnLoad;
+
+impl gpui_kit::Global for OpenInsertMenuOnLoad {}
+
 /// How long after the last keystroke an edit is written.
 const AUTOSAVE_DELAY: Duration = Duration::from_millis(500);
 
@@ -684,6 +688,17 @@ impl ItemEditor {
                 }
                 self.refresh_link_data(cx);
                 self.refresh_insert_options(cx);
+                // Kept for the whole launch: an editor loads its body more
+                // than once while opening, and a reload closes the menu.
+                let ends_in_slash = body
+                    .trim_end()
+                    .lines()
+                    .last()
+                    .is_some_and(|line| line.starts_with('/'));
+                if ends_in_slash && cx.has_global::<OpenInsertMenuOnLoad>() {
+                    self.block
+                        .update(cx, |block, cx| block.open_insert_menu_at_end(window, cx));
+                }
             }
             EditorMode::Raw => self
                 .raw

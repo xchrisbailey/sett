@@ -3,8 +3,8 @@ use std::path::Path;
 use gpui_kit::component::TitleBar;
 use gpui_kit::*;
 use sett::{
-    AppModel, ArchiveProject, DeleteProject, EditProject, GoBack, GoForward, NewProject, Shell,
-    ShowPersonal, ShowWork, ToggleEditorMode, UnarchiveProject,
+    AppModel, ArchiveProject, DeleteProject, EditProject, GoBack, GoForward, NewProject, Selection,
+    Shell, ShowPersonal, ShowWork, ToggleEditorMode, UnarchiveProject,
 };
 use sett_store::{LinkTarget, Settings};
 
@@ -67,21 +67,40 @@ fn main() {
             cx.new(|cx| Shell::new(shell_model, window, cx))
         })
         .expect("failed to open window");
-        if let Some(slug) = open_arg() {
-            // After the Shell exists, so it sees the open request.
-            model.update(cx, |m, cx| match m.index().resolve(&slug) {
-                LinkTarget::Found { item, .. } => m.open_item(item, cx),
-                LinkTarget::Broken => eprintln!("sett: --open {slug}: no such Item"),
-            });
+        if std::env::args().any(|arg| arg == "--insert-menu") {
+            sett::open_insert_menu_on_load(cx);
         }
+        // After the Shell exists, so it sees the open request.
+        let screen = arg_after("--screen");
+        let open = arg_after("--open");
+        model.update(cx, |m, cx| match (screen.as_deref(), open) {
+            (Some("templates"), Some(slug)) => m.open_template(&slug, cx),
+            (screen, Some(slug)) => {
+                if let Some(screen) = screen {
+                    eprintln!("sett: --screen {screen} is ignored with --open");
+                }
+                match m.index().resolve(&slug) {
+                    LinkTarget::Found { item, .. } => m.open_item(item, cx),
+                    LinkTarget::Broken => eprintln!("sett: --open {slug}: no such Item"),
+                }
+            }
+            (Some("journal"), None) => m.select(Selection::Journal, cx),
+            (Some("notes"), None) => m.select(Selection::Notes, cx),
+            (Some("templates"), None) => m.select(Selection::Templates, cx),
+            (Some(other), None) => {
+                eprintln!("sett: --screen {other}: not journal, notes or templates")
+            }
+            (None, None) => {}
+        });
         cx.activate(true);
     });
 }
 
-/// The Item slug after `--open`, which opens that Item in the last used Space
-/// at launch. `scripts/screenshot` uses it to capture an Item's body.
-fn open_arg() -> Option<String> {
-    let mut args = std::env::args().skip_while(|arg| arg != "--open");
+/// The value after `flag` on the command line. `scripts/screenshot` passes
+/// `--open SLUG` (an Item, or a Template with `--screen templates`) and
+/// `--screen journal|notes|templates` to choose what the window shows.
+fn arg_after(flag: &str) -> Option<String> {
+    let mut args = std::env::args().skip_while(|arg| arg != flag);
     args.next()?;
     args.next()
 }
