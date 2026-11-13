@@ -5,6 +5,7 @@
 //! the explicit `create_*`, `save_*` and `trash_*` calls, so callers control
 //! that an Item is written only after it was edited (ADR 0003).
 
+mod agents;
 mod board;
 mod callout;
 mod date;
@@ -38,7 +39,6 @@ use watch::WriteLog;
 pub const INBOX_SLUG: &str = "inbox";
 const DEFAULT_ICON: &str = "folder";
 const DEFAULT_COLUMNS: [&str; 3] = ["Todo", "Doing", "Done"];
-const AGENTS_MD: &str = include_str!("agents.md");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -147,6 +147,7 @@ impl Store {
         if !store.root.exists() {
             store.first_run()?;
         }
+        agents::sync(&store.root)?;
         Ok(store)
     }
 
@@ -175,10 +176,6 @@ impl Store {
             inbox.name = "Inbox".to_string();
             inbox.icon = Some("inbox".to_string());
             self.write_project(&inbox)?;
-        }
-        let agents = self.root.join("AGENTS.md");
-        if !agents.exists() {
-            fs::write(agents, AGENTS_MD)?;
         }
         Ok(())
     }

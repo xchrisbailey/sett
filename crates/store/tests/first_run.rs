@@ -29,9 +29,11 @@ fn existing_data_root_is_left_alone() {
 
     let store = Store::open(root).unwrap();
 
-    assert_eq!(
-        std::fs::read_to_string(root.join("AGENTS.md")).unwrap(),
-        "my own notes\n"
+    // sett appends its marked block but keeps the user's text.
+    assert!(
+        std::fs::read_to_string(root.join("AGENTS.md"))
+            .unwrap()
+            .starts_with("my own notes\n")
     );
     assert!(store.projects(Space::Work).is_empty());
     assert!(!root.join("work").exists());
