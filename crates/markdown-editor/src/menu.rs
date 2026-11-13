@@ -27,8 +27,10 @@ const ICON_CHECK: &[u8] = include_bytes!("../assets/icons/check.svg");
 const ANCHOR_GAP: Pixels = px(4.);
 /// The closest a menu comes to the window's edges.
 const WINDOW_MARGIN: Pixels = px(8.);
-/// The tallest a menu grows before it scrolls, if the window has room.
-const MAX_HEIGHT_REMS: f32 = 20.;
+/// The tallest a menu grows before it scrolls, if the window has room. It
+/// stops partway through a row (rows are about 1.94rem), so a cut-off row
+/// shows there is more below: macOS hides the scrollbar at rest.
+const MAX_HEIGHT_REMS: f32 = 19.;
 
 /// An open menu: the block it belongs to, its highlighted option and, for a
 /// menu that filters by typed text (the Language Menu), that query. Holding
@@ -468,8 +470,12 @@ pub(crate) fn popover(
             menu.scroll.scroll_to_item(row);
         }
         let overflows = menu.scroll.max_offset().y > px(0.);
+        // The handle only measures overflow after layout, so redraw once when
+        // the frame just drawn guessed wrong. `request_animation_frame` would
+        // notify the view being rendered, which doesn't redraw this editor.
         if menu.overflow_drawn.replace(overflows) != overflows {
-            window.request_animation_frame();
+            let state = state.clone();
+            window.on_next_frame(move |_, cx| state.update(cx, |_, cx| cx.notify()));
         }
         menu.scroll.clone()
     });

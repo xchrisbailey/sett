@@ -4455,7 +4455,7 @@ fn options_set_while_open_apply_on_reopen(cx: &mut TestAppContext) {
     assert_eq!(menu_labels(&editor, cx), ["Quote", "Template 0"]);
 }
 
-/// A long menu stops at the cap (20rem, less if the window is short) and
+/// A long menu stops at the cap (19rem, less if the window is short) and
 /// scrolls inside, so a highlighted row near the bottom stays in view.
 #[gpui::test]
 fn a_long_menu_is_capped_and_scrolls(cx: &mut TestAppContext) {
@@ -4466,7 +4466,7 @@ fn a_long_menu_is_capped_and_scrolls(cx: &mut TestAppContext) {
         (menu, window.rem_size())
     });
     assert!(
-        menu.size.height <= rem * 20.,
+        menu.size.height <= rem * 19.,
         "{:?} is over the cap",
         menu.size.height
     );
