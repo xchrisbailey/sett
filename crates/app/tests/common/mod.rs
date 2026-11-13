@@ -8,8 +8,8 @@ use std::time::{Duration, SystemTime};
 
 use gpui_kit::test::{ElementSnapshot, TestEventExt, TestQueryExt, TestWindowExt};
 use gpui_kit::{
-    AnyWindowHandle, AppContext, Bounds, Entity, MouseButton, TestAppContext, Window, WindowBounds,
-    WindowOptions, px, size,
+    AnyWindowHandle, AppContext, Bounds, ElementId, Entity, MouseButton, TestAppContext, Window,
+    WindowBounds, WindowOptions, px, size,
 };
 use sett::{AppModel, Shell};
 use sett_store::{Change, Settings};
@@ -109,6 +109,11 @@ pub fn find_label(
         Some(scope) => window.within(scope).find_by_label(label),
         None => window.find_by_label(label),
     }
+}
+
+/// The Card of the Task with this slug.
+pub fn find_card(window: &mut Window, slug: &str) -> ElementSnapshot {
+    window.find(ElementId::Name(format!("card-{slug}").into()))
 }
 
 pub fn center_title(window: &mut Window) -> String {

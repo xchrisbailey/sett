@@ -5,11 +5,14 @@ use std::path::{Path, PathBuf};
 
 use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{
-    AnyWindowHandle, AppContext, Bounds, ElementId, Entity, TestAppContext, WindowBounds,
-    WindowOptions, px, size,
+    AnyWindowHandle, AppContext, Bounds, Entity, TestAppContext, WindowBounds, WindowOptions, px,
+    size,
 };
 use sett::{AppModel, Shell};
 use sett_store::{Change, Settings};
+
+mod common;
+use common::find_card;
 
 struct Fixture {
     _dir: tempfile::TempDir,
@@ -74,7 +77,7 @@ fn description(
 ) -> (Option<String>, Option<String>) {
     cx.update_window(f.window, |_, window, cx| {
         window.render_frame(cx);
-        let card = window.find(ElementId::Name(format!("card-{slug}").into()));
+        let card = find_card(window, slug);
         let label = card.label().map(str::to_string);
         let description = card.description().map(str::to_string);
         (label, description)
