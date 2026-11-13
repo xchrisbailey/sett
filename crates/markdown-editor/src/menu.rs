@@ -10,10 +10,11 @@
 use gpui::{
     AnyElement, App, Bounds, Context, Entity, Hsla, InteractiveElement as _, IntoElement,
     ParentElement, Pixels, Point, Role, ScrollHandle, SharedString,
-    StatefulInteractiveElement as _, Styled, Window, anchored, deferred, div, point,
-    prelude::FluentBuilder as _, px, rems,
+    StatefulInteractiveElement as _, Styled, Window, anchored, deferred, div, linear_color_stop,
+    linear_gradient, point, prelude::FluentBuilder as _, px, rems,
 };
 use gpui_kit::base::TestSupportExt as _;
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _};
 
 use super::{
@@ -413,6 +414,22 @@ pub(crate) fn checked_option(
         .into_any_element()
 }
 
+/// A fade over the bottom of the rows, as wide as the popover. It lets
+/// clicks through to the rows beneath.
+fn more_below_fade(background: Hsla) -> impl IntoElement {
+    div()
+        .absolute()
+        .bottom_0()
+        .left_0()
+        .right_0()
+        .h_6()
+        .bg(linear_gradient(
+            180.,
+            linear_color_stop(background.opacity(0.), 0.),
+            linear_color_stop(background, 1.),
+        ))
+}
+
 /// What a popover shows: `header` stays put above the scrolling `rows`, and
 /// `highlighted` is the index in `rows` of the highlighted one, which a key
 /// move scrolls into view.
@@ -476,14 +493,34 @@ pub(crate) fn popover(
                     })
                     .children(content.header)
                     .child(
+                        // The scrollbar overlays this wrapper rather than the
+                        // scrolling div, or it would scroll away with the rows.
                         div()
-                            .id((id, 1usize))
+                            .relative()
                             .flex()
                             .flex_col()
                             .min_h_0()
-                            .overflow_y_scroll()
-                            .when_some(scroll, |this, scroll| this.track_scroll(&scroll))
-                            .children(content.rows),
+                            .child(
+                                div()
+                                    .id((id, 1usize))
+                                    .flex()
+                                    .flex_col()
+                                    .min_h_0()
+                                    .overflow_y_scroll()
+                                    .when_some(scroll.clone(), |this, scroll| {
+                                        this.track_scroll(&scroll)
+                                    })
+                                    .children(content.rows),
+                            )
+                            .when_some(scroll, |this, scroll| {
+                                // macOS hides scrollbars at rest, so a fade
+                                // also says there are more rows below.
+                                let more_below = scroll.max_offset().y > px(0.)
+                                    && scroll.offset().y > -scroll.max_offset().y;
+                                this.vertical_scrollbar(&scroll).when(more_below, |this| {
+                                    this.child(more_below_fade(theme.popover))
+                                })
+                            }),
                     ),
             ),
     )
