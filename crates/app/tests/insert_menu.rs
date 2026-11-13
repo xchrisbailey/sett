@@ -123,13 +123,13 @@ fn clicking_an_entry_picks_it(cx: &mut TestAppContext) {
     input(cx, &f, "/");
     cx.update_window(f.window, |_, window, cx| {
         window.render_frame(cx);
-        click_label(window, Some("block-editor-insert-menu"), "Divider", cx);
+        click_label(window, Some("block-editor-insert-menu"), "Heading 2", cx);
     })
     .unwrap();
     cx.run_until_parked();
     assert!(!menu_open(cx, &f));
-    input(cx, &f, "after");
-    assert_eq!(saved_body(cx, &path), "First line\n\n---\n\nafter\n");
+    input(cx, &f, "Title");
+    assert_eq!(saved_body(cx, &path), "First line\n\n## Title\n");
 }
 
 #[gpui_kit::test]

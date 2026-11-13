@@ -171,6 +171,7 @@ impl BlockEditorState {
     fn reset_language_highlight(&mut self, cx: &mut Context<Self>) {
         if let Some(menu) = self.language_menu.as_mut() {
             menu.highlighted = 0;
+            menu.reveal_highlighted();
         }
         cx.notify();
     }
@@ -200,18 +201,16 @@ impl BlockEditorState {
 /// The open menu as a deferred, window-anchored popover.
 pub(crate) fn render(
     state: &gpui::Entity<BlockEditorState>,
+    window: &gpui::Window,
     cx: &gpui::App,
 ) -> Option<gpui::AnyElement> {
     use gpui::prelude::FluentBuilder as _;
     use gpui::{
         InteractiveElement as _, IntoElement as _, ParentElement as _, Role,
-        StatefulInteractiveElement as _, Styled as _, div, rems,
+        StatefulInteractiveElement as _, Styled as _, div,
     };
     use gpui_kit::base::TestSupportExt as _;
     use gpui_kit::component::ActiveTheme as _;
-
-    /// The list scrolls past this height.
-    const MAX_HEIGHT_REMS: f32 = 18.;
 
     let s = state.read(cx);
     let menu = s.language_menu.as_ref()?;
@@ -243,14 +242,8 @@ pub(crate) fn render(
         });
 
     let rows = rows(query);
-    let list = div()
-        .id("language-menu-list")
-        .flex()
-        .flex_col()
-        .max_h(rems(MAX_HEIGHT_REMS))
-        .overflow_y_scroll();
-    let list = if rows.is_empty() {
-        list.child(
+    let list: Vec<gpui::AnyElement> = if rows.is_empty() {
+        vec![
             div()
                 .id("language-menu-empty")
                 .role(Role::Label)
@@ -259,38 +252,47 @@ pub(crate) fn render(
                 .px_2()
                 .py_1()
                 .text_color(muted)
-                .child("No matching languages"),
-        )
+                .child("No matching languages")
+                .into_any_element(),
+        ]
     } else {
-        list.children(rows.iter().enumerate().map(|(ix, row)| {
-            let on = ix == highlighted;
-            let ticked = row.is_current(current.as_deref());
-            let label = row.label();
-            let name = if ticked {
-                format!("{label}, current")
-            } else {
-                label.clone()
-            };
-            menu::checked_option(
-                state,
-                menu::CheckedOption {
-                    slot: MenuSlot::Language,
-                    ix,
-                    name: name.into(),
-                    label: label.into(),
-                    leading: None,
-                    on,
-                    ticked,
-                },
-                cx,
-            )
-        }))
+        rows.iter()
+            .enumerate()
+            .map(|(ix, row)| {
+                let on = ix == highlighted;
+                let ticked = row.is_current(current.as_deref());
+                let label = row.label();
+                let name = if ticked {
+                    format!("{label}, current")
+                } else {
+                    label.clone()
+                };
+                menu::checked_option(
+                    state,
+                    menu::CheckedOption {
+                        slot: MenuSlot::Language,
+                        ix,
+                        name: name.into(),
+                        label: label.into(),
+                        leading: None,
+                        on,
+                        ticked,
+                    },
+                    cx,
+                )
+            })
+            .collect()
     };
     Some(menu::popover(
         state,
         MenuSlot::Language,
         at,
-        [query_row.into_any_element(), list.into_any_element()],
+        menu::Content {
+            header: Some(query_row.into_any_element()),
+            rows: list,
+            highlighted: Some(highlighted),
+        },
+        window,
         cx,
     ))
 }
