@@ -131,6 +131,8 @@ pub(crate) fn init_for_tests(cx: &mut gpui::App) {
     init(cx);
 }
 
+// FORK: the Callout type's icon and colour, for a Card's Callout line.
+pub use callout::{color as callout_color, icon as callout_icon};
 pub use id::BlockId;
 pub use kind::{BlockKind, Callout, CalloutKind};
 pub use marks::{MarkChange, MarkKind, MarkSet, MarkState};

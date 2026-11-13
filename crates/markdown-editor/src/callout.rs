@@ -34,7 +34,10 @@ const ICON_CHEVRON: &[u8] = include_bytes!("../assets/icons/chevron-down.svg");
 /// How strongly the type's colour tints the box.
 pub(crate) const TINT: f32 = 0.08;
 
-pub(crate) fn icon(kind: CalloutKind) -> &'static [u8] {
+/// The type's Lucide icon, as SVG bytes for `Icon::data`.
+///
+/// FORK: public so a Card on the Board draws the same icon as the editor.
+pub fn icon(kind: CalloutKind) -> &'static [u8] {
     match kind {
         CalloutKind::Note => ICON_NOTE,
         CalloutKind::Tip => ICON_TIP,
@@ -45,7 +48,9 @@ pub(crate) fn icon(kind: CalloutKind) -> &'static [u8] {
 }
 
 /// The type's colour.
-pub(crate) fn color(kind: CalloutKind, cx: &App) -> Hsla {
+///
+/// FORK: public so a Card on the Board draws the same colour as the editor.
+pub fn color(kind: CalloutKind, cx: &App) -> Hsla {
     let theme = cx.theme();
     match kind {
         CalloutKind::Note => theme.info,
