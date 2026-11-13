@@ -225,7 +225,8 @@ fn inline_plain(text: &str) -> String {
     while i < chars.len() {
         let c = chars[i];
         match c {
-            '\\' if i + 1 < chars.len() => {
+            // Only ASCII punctuation can be escaped; `\s` keeps its backslash.
+            '\\' if chars.get(i + 1).is_some_and(char::is_ascii_punctuation) => {
                 out.push(chars[i + 1]);
                 i += 2;
             }

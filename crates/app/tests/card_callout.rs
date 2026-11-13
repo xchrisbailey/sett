@@ -86,7 +86,8 @@ fn description(
 
 #[gpui_kit::test]
 fn a_card_with_a_callout_keeps_its_title_and_describes_the_callout(cx: &mut TestAppContext) {
-    let body = "> [!WARNING]\n> Breaks on UNC paths like \\\\server\\share.\n> Needs a Windows VM to reproduce.\n> Third line.\n";
+    // In Markdown source a literal backslash is written twice.
+    let body = "> [!WARNING]\n> Breaks on UNC paths like \\\\\\\\server\\share.\n> Needs a Windows VM to reproduce.\n> Third line.\n";
     let f = open_board(cx, &[("paths", body)]);
     let (label, desc) = description(cx, &f, "paths");
     assert_eq!(label.as_deref(), Some("paths"));

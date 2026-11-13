@@ -228,3 +228,12 @@ fn fence_lines_are_dropped_and_code_lines_kept() {
 fn a_quote_with_only_a_fence_is_empty() {
     assert_eq!(first("> [!NOTE]\n> ```\n> ```\n"), None);
 }
+
+#[test]
+fn a_backslash_before_a_letter_is_kept() {
+    // CommonMark only escapes ASCII punctuation: `\s` stays, `\\` is one `\`.
+    assert_eq!(
+        first("> [!WARNING]\n> Breaks on \\\\server\\share.\n"),
+        callout(CalloutType::Warning, &["Breaks on \\server\\share."]),
+    );
+}
