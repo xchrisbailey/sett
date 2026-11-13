@@ -75,11 +75,9 @@ fn description(
     cx.update_window(f.window, |_, window, cx| {
         window.render_frame(cx);
         let card = window.find(ElementId::Name(format!("card-{slug}").into()));
-        let out = (
-            card.label().map(str::to_string),
-            card.description().map(str::to_string),
-        );
-        out
+        let label = card.label().map(str::to_string);
+        let description = card.description().map(str::to_string);
+        (label, description)
     })
     .unwrap()
 }
