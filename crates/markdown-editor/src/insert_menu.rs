@@ -267,6 +267,33 @@ impl BlockEditorState {
         self.insert_menu.as_ref().map(|m| m.highlighted)
     }
 
+    /// FORK: opens the menu as if the body's last paragraph had just been
+    /// typed, when that paragraph starts with `/` (the rest is the query).
+    /// For the host's screenshot tooling, which can't type. The menu hangs
+    /// under its paragraph as last painted, and a body that just loaded hasn't
+    /// been painted yet, so this redraws once more on the next frame.
+    pub fn open_insert_menu_at_end(&mut self, window: &mut gpui::Window, cx: &mut Context<Self>) {
+        if self.readonly || self.insert_menu_options.is_empty() || self.select_end(cx).is_err() {
+            return;
+        }
+        let Some(caret) = self.model.caret() else {
+            return;
+        };
+        let doc = &self.model.doc;
+        if doc.kind(caret.block) == Some(&BlockKindData::Paragraph)
+            && doc
+                .leaf_text(caret.block)
+                .is_some_and(|t| t.starts_with('/'))
+        {
+            self.close_all_menus(cx);
+            self.insert_menu = Some(OpenMenu::new(caret.block, 0));
+            self.sync_insert_menu();
+            let this = cx.entity();
+            window.on_next_frame(move |_, cx| this.update(cx, |_, cx| cx.notify()));
+            cx.notify();
+        }
+    }
+
     /// Open the menu if the caret's paragraph holds exactly the `/` just
     /// typed. Called after typing, never during IME composition.
     pub(crate) fn maybe_open_insert_menu(&mut self, cx: &mut Context<Self>) {

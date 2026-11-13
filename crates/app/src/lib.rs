@@ -29,6 +29,12 @@ pub use shell::{
 
 /// Registers the app's key bindings. Call after `gpui_kit::init` and before
 /// `set_menus`.
+/// For `scripts/screenshot --insert-menu`: for the rest of this launch, a body
+/// the editor loads that ends in a `/query` line opens its Insert Menu.
+pub fn open_insert_menu_on_load(cx: &mut gpui_kit::App) {
+    cx.set_global(item_editor::OpenInsertMenuOnLoad);
+}
+
 pub fn init(cx: &mut gpui_kit::App) {
     markdown_editor::init(cx);
     board::init(cx);

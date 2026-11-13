@@ -32,6 +32,8 @@ pub enum AppModelEvent {
     /// Show this Item of the active Space. The selection already points at
     /// where it lives.
     OpenItem(ItemId),
+    /// Show this Template of the active Space on the Templates screen.
+    OpenTemplate(String),
 }
 
 /// The open data root and the active Space: its index, kept current by a
@@ -234,6 +236,13 @@ impl AppModel {
         self.selections.insert(self.space(), selection_of(&item));
         self.open_items.insert(self.space(), item.clone());
         cx.emit(AppModelEvent::OpenItem(item));
+        cx.notify();
+    }
+
+    pub fn open_template(&mut self, slug: &str, cx: &mut Context<Self>) {
+        self.selections.insert(self.space(), Selection::Templates);
+        self.open_items.remove(&self.space());
+        cx.emit(AppModelEvent::OpenTemplate(slug.to_string()));
         cx.notify();
     }
 
