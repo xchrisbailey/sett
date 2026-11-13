@@ -115,6 +115,39 @@ fn outside_changes_are_reported_quickly() {
 }
 
 #[test]
+fn template_changes_are_reported_by_slug() {
+    let (_dir, store) = new_store();
+    let root = store.root().to_path_buf();
+    let watcher = store.watch(Space::Work).unwrap();
+    let rx = watcher.events();
+    let template = |slug: &str| Change::Template(slug.into());
+
+    write(&root, "work/templates/bug.md", "---\ntitle: Bug\n---\n");
+    collect_until(&rx, &[template("bug")]);
+
+    fs::rename(
+        root.join("work/templates/bug.md"),
+        root.join("work/templates/defect.md"),
+    )
+    .unwrap();
+    collect_until(&rx, &[template("bug"), template("defect")]);
+
+    fs::remove_file(root.join("work/templates/defect.md")).unwrap();
+    collect_until(&rx, &[template("defect")]);
+
+    // Hidden temp files are ignored; the folder vanishing reloads the list.
+    write(&root, "work/templates/.bug.md.swp", "x");
+    write(&root, "work/templates/z.md", "Z\n");
+    fs::remove_dir_all(root.join("work/templates")).unwrap();
+    let seen = collect_until(&rx, &[Change::Templates]);
+    assert!(
+        !seen
+            .iter()
+            .any(|c| matches!(c, Change::Template(s) if s.starts_with('.')))
+    );
+}
+
+#[test]
 fn own_writes_and_other_space_are_ignored() {
     let (_dir, store) = new_store();
     let root = store.root().to_path_buf();

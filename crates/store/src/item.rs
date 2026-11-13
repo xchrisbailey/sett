@@ -270,3 +270,49 @@ impl JournalEntry {
         doc
     }
 }
+
+/// A body to start a new Item from, kept in `<space>/templates/`. Not an Item:
+/// it has no Links and appears in no list of Items.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Template {
+    pub space: Space,
+    pub slug: String,
+    pub title: String,
+    /// Holds no frontmatter.
+    pub body: String,
+    /// Every frontmatter key as last read or written, so unknown keys survive
+    /// a save in their original order. Never copied into a new Item.
+    pub(crate) fields: Mapping,
+    /// The raw frontmatter when it couldn't be read; see [`Template::frontmatter_error`].
+    pub(crate) unreadable: Option<String>,
+}
+
+impl Template {
+    /// Whether the file's frontmatter couldn't be read. sett never writes such
+    /// a file, so it must be fixed in another editor.
+    pub fn frontmatter_error(&self) -> bool {
+        self.unreadable.is_some()
+    }
+
+    pub(crate) fn from_doc(space: Space, slug: &str, doc: Document) -> Template {
+        Template {
+            space,
+            slug: slug.to_string(),
+            title: doc.str("title").unwrap_or_else(|| slug.to_string()),
+            body: doc.body,
+            fields: doc.fields,
+            unreadable: doc.unreadable,
+        }
+    }
+
+    pub(crate) fn to_doc(&self) -> Document {
+        let mut doc = Document {
+            fields: self.fields.clone(),
+            body: String::new(),
+            unreadable: self.unreadable.clone(),
+        };
+        doc.set("title", self.title.as_str());
+        doc.body = self.body.clone();
+        doc
+    }
+}
