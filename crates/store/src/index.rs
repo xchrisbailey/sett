@@ -19,6 +19,12 @@ pub enum Change {
         slug: String,
     },
     Journal(Date),
+    /// A file in the Space's `templates/` folder, by slug. Templates aren't
+    /// Items, so the index holds nothing for them; the app re-reads the
+    /// Template from the Store.
+    Template(String),
+    /// The `templates/` folder itself moved or vanished: reload the list.
+    Templates,
     /// A top-level folder of the Space moved or vanished: rescan everything.
     All,
 }
@@ -31,6 +37,7 @@ impl Change {
     pub fn covers(&self, item: &Change) -> bool {
         match (self, item) {
             (Change::All, _) => true,
+            (Change::Templates, Change::Template(_)) => true,
             (Change::Project(p), Change::Task { project, .. }) => p == project,
             (Change::Project(p), Change::Note { project, .. }) => project.as_ref() == Some(p),
             _ => self == item,
@@ -123,6 +130,7 @@ impl SpaceIndex {
                 );
                 sync(&mut self.journal, *date, fresh)
             }
+            Change::Template(_) | Change::Templates => Update::Unchanged,
             Change::Project(slug) => self.apply_project(store, slug),
             Change::All => {
                 let fresh = SpaceIndex::scan(store, space);

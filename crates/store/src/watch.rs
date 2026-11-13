@@ -196,6 +196,8 @@ fn classify(rel: &Path) -> Option<Change> {
         .collect::<Option<_>>()?;
     match parts.as_slice() {
         [] | ["projects"] | ["notes"] | ["journal"] => Some(Change::All),
+        ["templates"] => Some(Change::Templates),
+        ["templates", f] => Some(Change::Template(md_stem(f)?.to_string())),
         ["projects", p, rest @ ..] if visible(p) => {
             let project = p.to_string();
             match rest {

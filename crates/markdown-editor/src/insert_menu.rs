@@ -232,7 +232,11 @@ impl BlockEditorState {
             .insert_menu_options
             .iter()
             .filter(|option| {
-                callouts || !matches!(option.command(), EditorCommand::InsertCallout(_))
+                callouts
+                    || !matches!(
+                        option.command(),
+                        EditorCommand::InsertCallout(_) | EditorCommand::InsertMarkdown(_)
+                    )
             })
             .filter(|option| option.matches(query))
             .collect();
