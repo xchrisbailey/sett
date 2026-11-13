@@ -375,3 +375,35 @@ fn templates_are_not_offered_inside_a_list_item(cx: &mut TestAppContext) {
     assert!(has_label(cx, &f, "Heading 1"));
     assert!(!has_label(cx, &f, "Standup"));
 }
+
+/// A menu taller than its cap hints that rows continue below, from the first
+/// frame it is visible, and stops hinting at the bottom.
+#[gpui_kit::test]
+fn a_long_menu_hints_that_more_rows_lie_below(cx: &mut TestAppContext) {
+    let (f, _) = on_a_new_line(cx);
+    for i in 0..30 {
+        add_template(
+            cx,
+            &f,
+            &format!("t{i:02}"),
+            &format!("Template {i:02}"),
+            "x\n",
+        );
+    }
+    input(cx, &f, "/");
+    assert!(menu_open(cx, &f));
+    let hint = |cx: &mut TestAppContext| {
+        cx.update_window(f.window, |_, window, cx| {
+            window.render_frame(cx);
+            window.try_find("insert-menu-more-below").is_some()
+        })
+        .unwrap()
+    };
+    assert!(hint(cx), "no hint at rest");
+
+    // Up from the first row wraps to the last, which scrolls to the bottom.
+    press(cx, &f, "up");
+    hint(cx);
+    hint(cx);
+    assert!(!hint(cx), "still hinting at the bottom");
+}

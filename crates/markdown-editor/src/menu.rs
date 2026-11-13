@@ -44,6 +44,10 @@ pub(crate) struct OpenMenu {
     /// The next frame scrolls the highlighted row into view. Set when the
     /// highlight moves by key (not by hover, which must not fight the wheel).
     reveal: std::cell::Cell<bool>,
+    /// Whether the last frame was drawn knowing the rows overflow. The scroll
+    /// handle learns its size only after layout, so a menu's first frame
+    /// can't tell; a frame is requested when this and the measure differ.
+    overflow_drawn: std::cell::Cell<bool>,
 }
 
 impl OpenMenu {
@@ -54,6 +58,7 @@ impl OpenMenu {
             query: String::new(),
             scroll: ScrollHandle::new(),
             reveal: std::cell::Cell::new(highlighted > 0),
+            overflow_drawn: std::cell::Cell::new(false),
         }
     }
 
@@ -418,6 +423,8 @@ pub(crate) fn checked_option(
 /// clicks through to the rows beneath.
 fn more_below_fade(background: Hsla) -> impl IntoElement {
     div()
+        .id("insert-menu-more-below")
+        .test_support()
         .absolute()
         .bottom_0()
         .left_0()
@@ -459,6 +466,10 @@ pub(crate) fn popover(
             && let Some(row) = content.highlighted
         {
             menu.scroll.scroll_to_item(row);
+        }
+        let overflows = menu.scroll.max_offset().y > px(0.);
+        if menu.overflow_drawn.replace(overflows) != overflows {
+            window.request_animation_frame();
         }
         menu.scroll.clone()
     });
