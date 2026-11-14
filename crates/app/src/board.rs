@@ -18,6 +18,8 @@ use gpui_kit::{
     TestSupportExt as _, Window, actions, div, prelude::FluentBuilder as _, px,
 };
 use markdown_editor::CalloutKind;
+
+use crate::labels::label_chip;
 use sett_store::{Board, BoardColumn, CalloutKind as TaskCalloutKind, Date, Task, TaskCallout};
 
 use crate::app_model::{AppModel, Selection};
@@ -558,8 +560,9 @@ impl BoardView {
         });
         let has_meta = due.is_some() || checklist.is_some();
         let callout = task.first_callout();
-        let description = callout.as_ref().map(callout_description);
+        let description = card_description(callout.as_ref().map(callout_description), &task.labels);
         let callout = callout.map(|callout| callout_line(&callout, cx));
+        let labels = label_row(&slug, &task.labels, cx);
 
         let (click_slug, key_slug, menu_slug) = (slug.clone(), slug.clone(), slug.clone());
         let menu_title = task.title.clone();
@@ -616,6 +619,7 @@ impl BoardView {
                 ))
             })
             .child(div().text_sm().child(title))
+            .children(labels)
             .children(callout)
             .when(has_meta, |card| {
                 card.child(
@@ -654,6 +658,62 @@ fn callout_kind(kind: TaskCalloutKind) -> CalloutKind {
         TaskCalloutKind::Warning => CalloutKind::Warning,
         TaskCalloutKind::Caution => CalloutKind::Caution,
     }
+}
+
+/// At most this many Label chips show on a Card; the rest collapse into "+N"
+/// so a heavily tagged Task doesn't swamp its title.
+const CARD_LABEL_LIMIT: usize = 3;
+
+/// The Card's accessible description: the Callout's, then every Label, since
+/// the "+N" hides some from the eye but not from a screen reader.
+fn card_description(callout: Option<String>, labels: &[String]) -> Option<String> {
+    let labels = (!labels.is_empty()).then(|| format!("Labels: {}", labels.join(", ")));
+    match (callout, labels) {
+        (Some(callout), Some(labels)) => Some(format!("{callout} {labels}")),
+        (callout, labels) => callout.or(labels),
+    }
+}
+
+/// The wrapping chip row under a Card's title, or `None` for a Task without
+/// Labels so the Card gets no empty gap.
+fn label_row(slug: &str, labels: &[String], cx: &Context<BoardView>) -> Option<AnyElement> {
+    if labels.is_empty() {
+        return None;
+    }
+    let hidden = labels.len().saturating_sub(CARD_LABEL_LIMIT);
+    let chips = labels
+        .iter()
+        .take(CARD_LABEL_LIMIT)
+        .enumerate()
+        .map(|(ix, label)| {
+            div()
+                .id(ElementId::Name(format!("card-label-{slug}-{ix}").into()))
+                .test_support()
+                .aria_label(label.clone())
+                .min_w_0()
+                .child(label_chip(label))
+        });
+    Some(
+        h_flex()
+            .id(ElementId::Name(format!("card-labels-{slug}").into()))
+            .test_support()
+            .flex_wrap()
+            .items_center()
+            .gap_1()
+            .children(chips)
+            .when(hidden > 0, |row| {
+                row.child(
+                    div()
+                        .id(ElementId::Name(format!("card-labels-more-{slug}").into()))
+                        .test_support()
+                        .aria_label(format!("+{hidden}"))
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(format!("+{hidden}")),
+                )
+            })
+            .into_any_element(),
+    )
 }
 
 /// What a Card's accessible description says about its Callout:
