@@ -585,6 +585,37 @@ impl AppModel {
         self.save_task(&mut task, cx)
     }
 
+    /// Replaces a Task's Labels, writing only that Task's file. Labels that
+    /// already match leave the file alone.
+    pub fn set_task_labels(
+        &mut self,
+        project: &str,
+        slug: &str,
+        labels: &[String],
+        cx: &mut Context<Self>,
+    ) -> io::Result<()> {
+        let task = self.index.task(project, slug).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, format!("task {slug} not found"))
+        })?;
+        if task.labels == sett_store::normalize_labels(labels) {
+            return Ok(());
+        }
+        self.store
+            .set_task_labels(self.space(), project, slug, labels)?;
+        self.apply_change(task_change(project, slug), cx);
+        Ok(())
+    }
+
+    /// Every Label the active Space's Tasks use, sorted ignoring case.
+    pub fn space_labels(&self) -> Vec<String> {
+        sett_store::labels_of(
+            self.index
+                .projects()
+                .into_iter()
+                .flat_map(|p| self.index.tasks(&p.slug)),
+        )
+    }
+
     pub fn add_column(
         &mut self,
         project: &str,
