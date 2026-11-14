@@ -9,6 +9,8 @@ mod dates;
 mod icons;
 mod item_editor;
 mod item_links;
+mod label_field;
+mod labels;
 mod link_data;
 mod nav;
 mod notes;

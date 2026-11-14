@@ -2,6 +2,7 @@ use std::io;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::calendar::Date as PickerDate;
+use gpui_kit::component::combobox::{Combobox, ComboboxEvent, ComboboxState};
 use gpui_kit::component::date_picker::{DatePicker, DatePickerEvent, DatePickerState};
 use gpui_kit::component::input::Input;
 use gpui_kit::component::notification::Notification;
@@ -15,12 +16,13 @@ use gpui_kit::{
     InteractiveElement as _, IntoElement, KeyBinding, ParentElement as _, Render, SharedString,
     Styled as _, Subscription, TestSupportExt as _, Window, actions, div,
 };
-use sett_store::{Board, Date, ItemId, Space};
+use sett_store::{Board, Date, ItemId, Space, same_label};
 
 use crate::app_model::AppModel;
 use crate::confirm_delete::{ITEM_CONSEQUENCE, confirm_delete};
 use crate::dates::{from_chrono, to_chrono};
 use crate::item_editor::{ItemEditor, ItemRef};
+use crate::label_field::{LabelOptions, render_trigger, spelled_like_the_space};
 
 actions!(sett, [CloseTask]);
 
@@ -37,11 +39,24 @@ pub(crate) enum TaskViewEvent {
 }
 
 type ColumnSelect = SelectState<SearchableVec<SharedString>>;
+type LabelsCombobox = ComboboxState<LabelOptions>;
+
+/// What the controls last showed, so a AppModel change that doesn't touch it
+/// leaves them alone.
+#[derive(PartialEq)]
+struct Shown {
+    columns: Vec<String>,
+    column: String,
+    due: Option<Date>,
+    labels: Vec<String>,
+    /// The Space's Labels, which a Task elsewhere can add to.
+    space_labels: Vec<String>,
+}
 
 /// One Task in full: its title, its Column and due date as controls, and its
 /// body in the same editor Notes use.
 ///
-/// The Column and due date are written as soon as they change, each touching
+/// The Column, due date and Labels are written as soon as they change, each touching
 /// only this Task's file. The title and body follow the editor's rule of
 /// saving only after a real edit (ADR 0003).
 pub(crate) struct TaskView {
@@ -54,9 +69,8 @@ pub(crate) struct TaskView {
     editor: Entity<ItemEditor>,
     column: Entity<ColumnSelect>,
     due: Entity<DatePickerState>,
-    /// The Columns, Column and due date last put into the controls, so a
-    /// AppModel change that doesn't touch them leaves the controls alone.
-    shown: Option<(Vec<String>, String, Option<Date>)>,
+    labels: Entity<LabelsCombobox>,
+    shown: Option<Shown>,
     focus_handle: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -79,6 +93,12 @@ impl TaskView {
         let column =
             cx.new(|cx| SelectState::new(SearchableVec::new(Vec::new()), None, window, cx));
         let due = cx.new(|cx| DatePickerState::new(window, cx).date_format("%b %-d, %Y"));
+        let view = cx.entity().downgrade();
+        let labels = cx.new(|cx| {
+            ComboboxState::new(LabelOptions::new(Vec::new(), view), Vec::new(), window, cx)
+                .multiple(true)
+                .searchable(true)
+        });
         let subscriptions = vec![
             cx.subscribe_in(
                 &column,
@@ -95,6 +115,16 @@ impl TaskView {
                 let due = value.start().and_then(from_chrono);
                 this.set_due(due, window, cx);
             }),
+            cx.subscribe_in(&labels, window, |this, labels, event, window, cx| {
+                let ComboboxEvent::Change(values) = event else {
+                    return;
+                };
+                let picked: Vec<String> = values.iter().map(ToString::to_string).collect();
+                this.set_labels(picked, window, cx);
+                // A pick finishes what was typed; `sync` keeps the query
+                // only for changes that aren't the user's pick.
+                labels.update(cx, |combobox, cx| combobox.set_query("", window, cx));
+            }),
             cx.observe_in(&model, window, |this, _, window, cx| this.sync(window, cx)),
         ];
         let space = model.read(cx).space();
@@ -105,6 +135,7 @@ impl TaskView {
             editor,
             column,
             due,
+            labels,
             shown: None,
             focus_handle: cx.focus_handle(),
             _subscriptions: subscriptions,
@@ -195,8 +226,17 @@ impl TaskView {
             .find(|c| c.tasks().iter().any(|t| t.slug == slug))
             .map(|c| c.name().to_string())
             .unwrap_or_default();
-        let due = board.task(&slug).and_then(|t| t.due);
-        let shown = Some((project.columns.clone(), column.clone(), due));
+        let task = board.task(&slug);
+        let due = task.and_then(|t| t.due);
+        let labels = task.map(|t| t.labels.clone()).unwrap_or_default();
+        let space_labels = model.space_labels();
+        let shown = Some(Shown {
+            columns: project.columns.clone(),
+            column: column.clone(),
+            due,
+            labels: labels.clone(),
+            space_labels: space_labels.clone(),
+        });
         if shown == self.shown {
             return;
         }
@@ -213,6 +253,21 @@ impl TaskView {
         let date = PickerDate::Single(due.and_then(to_chrono));
         self.due
             .update(cx, |picker, cx| picker.set_date(date, window, cx));
+        // Rebuilt every time so a Label added here is listed and stays selected.
+        let view = cx.entity().downgrade();
+        let selected: Vec<SharedString> = labels.into_iter().map(SharedString::from).collect();
+        self.labels.update(cx, |combobox, cx| {
+            // Setting values and items both discard the search text, which
+            // would wipe a half-typed Label whenever another Task changes.
+            let query = combobox.query(cx);
+            combobox.set_items(LabelOptions::new(space_labels, view), window, cx);
+            if combobox.selected_values() != selected {
+                combobox.set_selected_values(&selected, window, cx);
+            }
+            if !query.is_empty() {
+                combobox.set_query(query, window, cx);
+            }
+        });
         cx.notify();
     }
 
@@ -222,7 +277,7 @@ impl TaskView {
         let Some((project, slug)) = self.task.clone() else {
             return;
         };
-        if self.shown.as_ref().is_some_and(|(_, c, _)| c == column) {
+        if self.shown.as_ref().is_some_and(|s| s.column == column) {
             return;
         }
         let result = self
@@ -269,6 +324,55 @@ impl TaskView {
         }
     }
 
+    /// The open Task's Labels as last shown.
+    fn current_labels(&self) -> Vec<String> {
+        self.shown
+            .as_ref()
+            .map(|s| s.labels.clone())
+            .unwrap_or_default()
+    }
+
+    /// Adds typed Labels, in the Space's spelling when it has one.
+    pub(crate) fn add_labels(
+        &mut self,
+        typed: &[String],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let space = self.model.read(cx).space_labels();
+        let mut labels = self.current_labels();
+        labels.extend(typed.iter().map(|t| spelled_like_the_space(t, &space)));
+        self.set_labels(labels, window, cx);
+        self.labels
+            .update(cx, |combobox, cx| combobox.set_query("", window, cx));
+    }
+
+    pub(crate) fn remove_label(
+        &mut self,
+        label: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mut labels = self.current_labels();
+        labels.retain(|l| !same_label(l, label));
+        self.set_labels(labels, window, cx);
+    }
+
+    fn set_labels(&mut self, labels: Vec<String>, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((project, slug)) = self.task.clone() else {
+            return;
+        };
+        let result = self
+            .model
+            .update(cx, |w, cx| w.set_task_labels(&project, &slug, &labels, cx));
+        if let Err(err) = result {
+            show_error("Couldn\u{2019}t change the Labels", err, window, cx);
+        }
+        // A rejected or ignored change must not leave the field showing it.
+        self.shown = None;
+        self.sync(window, cx);
+    }
+
     fn render_field(label: &'static str, control: impl IntoElement, cx: &App) -> impl IntoElement {
         h_flex()
             .gap_3()
@@ -294,6 +398,7 @@ impl Render for TaskView {
         }
         let editor = self.editor.read(cx);
         let (title, locked) = (editor.title_input().clone(), editor.locked());
+        let view = cx.entity().downgrade();
         v_flex()
             .id("task-view")
             .test_support()
@@ -337,6 +442,20 @@ impl Render for TaskView {
                                         .placeholder("No due date")
                                         .cleanable(true)
                                         .disabled(locked),
+                                ),
+                                cx,
+                            ))
+                            .child(Self::render_field(
+                                "Labels",
+                                div().id("task-labels").test_support().child(
+                                    Combobox::new(&self.labels)
+                                        .small()
+                                        .placeholder("Add a label")
+                                        .search_placeholder("Find or add a label")
+                                        .disabled(locked)
+                                        .render_trigger(move |trigger, _, cx| {
+                                            render_trigger(trigger, &view, cx)
+                                        }),
                                 ),
                                 cx,
                             ))

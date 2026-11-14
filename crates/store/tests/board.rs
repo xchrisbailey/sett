@@ -171,12 +171,12 @@ fn quick_added_task_goes_to_the_top_of_its_column() {
     write_task(&store, "doing", "Doing", 1.0, None);
 
     let task = store
-        .create_task_in(Space::Work, "inbox", "Doing", "Write tests", today)
+        .create_task_in(Space::Work, "inbox", "Doing", "Write tests", today, None)
         .unwrap();
     assert_eq!(task.column.as_deref(), Some("Doing"));
     assert_eq!(task.done, None);
     let done = store
-        .create_task_in(Space::Work, "inbox", "Done", "Already shipped", today)
+        .create_task_in(Space::Work, "inbox", "Done", "Already shipped", today, None)
         .unwrap();
     assert_eq!(done.done, Some(today), "the last Column means done");
 
@@ -185,7 +185,7 @@ fn quick_added_task_goes_to_the_top_of_its_column() {
     assert_eq!(slugs(board.columns()[1].tasks()), ["write-tests", "doing"]);
     assert!(
         store
-            .create_task_in(Space::Work, "inbox", "Nope", "x", today)
+            .create_task_in(Space::Work, "inbox", "Nope", "x", today, None)
             .is_err()
     );
 }

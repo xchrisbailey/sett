@@ -498,19 +498,21 @@ impl AppModel {
         changed
     }
 
-    /// Quick-adds a Task at the top of a Column of the Project's Board.
+    /// Quick-adds a Task at the top of a Column of the Project's Board, with
+    /// `label` if given, and returns its slug.
     pub fn create_task(
         &mut self,
         project: &str,
         column: &str,
         title: &str,
+        label: Option<&str>,
         cx: &mut Context<Self>,
-    ) -> io::Result<()> {
-        let task = self
-            .store
-            .create_task_in(self.space(), project, column, title, today())?;
+    ) -> io::Result<String> {
+        let task =
+            self.store
+                .create_task_in(self.space(), project, column, title, today(), label)?;
         self.reload(vec![task_change(project, &task.slug)], cx);
-        Ok(())
+        Ok(task.slug)
     }
 
     /// Moves a Task on its Project's Board into `column`, before the Task
@@ -581,6 +583,42 @@ impl AppModel {
         }
         task.due = due;
         self.save_task(&mut task, cx)
+    }
+
+    /// Replaces a Task's Labels, writing only that Task's file. Labels that
+    /// already match leave the file alone.
+    pub fn set_task_labels(
+        &mut self,
+        project: &str,
+        slug: &str,
+        labels: &[String],
+        cx: &mut Context<Self>,
+    ) -> io::Result<()> {
+        let task = self.index.task(project, slug).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, format!("task {slug} not found"))
+        })?;
+        if task.labels == sett_store::normalize_labels(labels) {
+            return Ok(());
+        }
+        self.store
+            .set_task_labels(self.space(), project, slug, labels)?;
+        self.apply_change(task_change(project, slug), cx);
+        Ok(())
+    }
+
+    /// Every Label the Project's Tasks use, sorted ignoring case.
+    pub fn project_labels(&self, project: &str) -> Vec<String> {
+        sett_store::labels_of(self.index.tasks(project))
+    }
+
+    /// Every Label the active Space's Tasks use, sorted ignoring case.
+    pub fn space_labels(&self) -> Vec<String> {
+        sett_store::labels_of(
+            self.index
+                .projects()
+                .into_iter()
+                .flat_map(|p| self.index.tasks(&p.slug)),
+        )
     }
 
     pub fn add_column(

@@ -11,8 +11,8 @@ use gpui_kit::test::{
     TestAppContextExt as _, TestEventExt as _, TestQueryExt as _, TestWindowExt as _,
 };
 use gpui_kit::{
-    AnyWindowHandle, AppContext, Bounds, MouseButton, TestAppContext, WindowBounds, WindowOptions,
-    point, px, size,
+    AnyWindowHandle, AppContext, Bounds, Entity, MouseButton, TestAppContext, WindowBounds,
+    WindowOptions, point, px, size,
 };
 use sett::{AppModel, Shell};
 use sett_store::{Change, Settings};
@@ -21,6 +21,7 @@ struct Fixture {
     _dir: tempfile::TempDir,
     tasks_dir: PathBuf,
     window: AnyWindowHandle,
+    model: Entity<AppModel>,
 }
 
 /// Opens the shell on the Personal Inbox's Board with `tasks` on disk, each
@@ -68,6 +69,7 @@ fn open_board(cx: &mut TestAppContext, tasks: &[(&str, &str, f64, &str)]) -> Fix
         _dir: dir,
         tasks_dir,
         window,
+        model,
     }
 }
 
@@ -352,4 +354,218 @@ fn deleting_the_open_task_returns_to_the_board_without_saving_it(cx: &mut TestAp
 
     assert!(!task_path(&f, "a").exists());
     assert!(showing_board(cx, &f));
+}
+
+/// Opens the Labels popup of the open Task and types `text` into its search.
+fn search_labels(cx: &mut TestAppContext, f: &Fixture, text: &str) {
+    cx.update_window(f.window, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("task-labels", cx);
+        window.render_frame(cx);
+        window.input(text, cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+}
+
+fn press(cx: &mut TestAppContext, f: &Fixture, key: &str) {
+    cx.update_window(f.window, |_, window, cx| window.press(key, cx))
+        .unwrap();
+    cx.run_until_parked();
+}
+
+fn has_label(cx: &mut TestAppContext, f: &Fixture, label: &str) -> bool {
+    cx.update_window(f.window, |_, window, cx| {
+        window.render_frame(cx);
+        window
+            .try_find_by_label(&format!("Remove {label}"))
+            .is_some()
+    })
+    .unwrap()
+}
+
+#[gpui_kit::test]
+fn picking_an_existing_label_adds_it(cx: &mut TestAppContext) {
+    let f = open_board(
+        cx,
+        &[
+            ("a", "Todo", 1.0, ""),
+            ("b", "Todo", 2.0, "labels: [bug]\n"),
+        ],
+    );
+    open_task(cx, &f, "a");
+
+    search_labels(cx, &f, "bu");
+    press(cx, &f, "enter");
+
+    let text = fs::read_to_string(task_path(&f, "a")).unwrap();
+    assert!(text.contains("- bug"), "{text}");
+    assert!(has_label(cx, &f, "bug"));
+}
+
+#[gpui_kit::test]
+fn the_add_row_creates_a_new_label_and_a_case_variant_picks_the_existing_one(
+    cx: &mut TestAppContext,
+) {
+    let f = open_board(
+        cx,
+        &[
+            ("a", "Todo", 1.0, ""),
+            ("b", "Todo", 2.0, "labels: [bug]\n"),
+        ],
+    );
+    open_task(cx, &f, "a");
+
+    search_labels(cx, &f, "  docs ");
+    press(cx, &f, "enter");
+    let text = fs::read_to_string(task_path(&f, "a")).unwrap();
+    assert!(text.contains("- docs") && !text.contains("- bug"), "{text}");
+
+    // The new Label is listed for the next Task, and "BUG" finds "bug".
+    cx.update_window(f.window, |_, window, cx| {
+        window.render_frame(cx);
+        window.input("BUG", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    press(cx, &f, "enter");
+    let text = fs::read_to_string(task_path(&f, "a")).unwrap();
+    assert!(text.contains("- docs") && text.contains("- bug"), "{text}");
+    assert!(!text.contains("BUG"), "{text}");
+}
+
+#[gpui_kit::test]
+fn a_comma_commits_the_typed_text_and_enter_on_nothing_does_nothing(cx: &mut TestAppContext) {
+    let f = open_board(cx, &[("a", "Todo", 1.0, "")]);
+    let before = snapshot(&task_path(&f, "a"));
+    open_task(cx, &f, "a");
+
+    search_labels(cx, &f, "");
+    press(cx, &f, "enter");
+    assert_eq!(snapshot(&task_path(&f, "a")), before);
+
+    cx.update_window(f.window, |_, window, cx| window.input("ui,", cx))
+        .unwrap();
+    cx.run_until_parked();
+    let text = fs::read_to_string(task_path(&f, "a")).unwrap();
+    assert!(text.contains("- ui") && !text.contains(','), "{text}");
+}
+
+#[gpui_kit::test]
+fn the_x_on_a_label_removes_that_label(cx: &mut TestAppContext) {
+    let f = open_board(cx, &[("a", "Todo", 1.0, "labels: [bug, docs]\n")]);
+    open_task(cx, &f, "a");
+    assert!(has_label(cx, &f, "bug") && has_label(cx, &f, "docs"));
+
+    click_label(cx, &f, "Remove bug");
+
+    let text = fs::read_to_string(task_path(&f, "a")).unwrap();
+    assert!(text.contains("- docs") && !text.contains("bug"), "{text}");
+    assert!(!has_label(cx, &f, "bug") && has_label(cx, &f, "docs"));
+}
+
+#[gpui_kit::test]
+fn the_labels_follow_a_change_on_disk(cx: &mut TestAppContext) {
+    let f = open_board(cx, &[("a", "Todo", 1.0, "labels: [bug]\n")]);
+    open_task(cx, &f, "a");
+    assert!(has_label(cx, &f, "bug"));
+
+    fs::write(
+        task_path(&f, "a"),
+        "---\ntitle: a\ncolumn: Todo\norder: 1\nlabels: [ui]\n---\n",
+    )
+    .unwrap();
+    cx.update(|cx| {
+        f.model.update(cx, |m, cx| {
+            m.apply_change(
+                Change::Task {
+                    project: "inbox".into(),
+                    slug: "a".into(),
+                },
+                cx,
+            )
+        })
+    });
+    cx.run_until_parked();
+
+    assert!(has_label(cx, &f, "ui") && !has_label(cx, &f, "bug"));
+}
+
+#[gpui_kit::test]
+fn a_change_to_another_task_leaves_what_is_typed_alone(cx: &mut TestAppContext) {
+    let f = open_board(
+        cx,
+        &[
+            ("a", "Todo", 1.0, ""),
+            ("b", "Todo", 2.0, "labels: [bug]\n"),
+        ],
+    );
+    open_task(cx, &f, "a");
+    search_labels(cx, &f, "bu");
+
+    // A new Label appears in the Space while "bu" is still in the search box.
+    fs::write(
+        task_path(&f, "b"),
+        "---\ntitle: b\ncolumn: Todo\norder: 2\nlabels: [aardvark, bug]\n---\n",
+    )
+    .unwrap();
+    cx.update(|cx| {
+        f.model.update(cx, |m, cx| {
+            m.apply_change(
+                Change::Task {
+                    project: "inbox".into(),
+                    slug: "b".into(),
+                },
+                cx,
+            )
+        })
+    });
+    cx.run_until_parked();
+    press(cx, &f, "enter");
+
+    let text = fs::read_to_string(task_path(&f, "a")).unwrap();
+    assert!(
+        text.contains("- bug") && !text.contains("aardvark"),
+        "{text}"
+    );
+}
+
+#[gpui_kit::test]
+fn setting_the_labels_a_task_already_has_leaves_its_file_alone(cx: &mut TestAppContext) {
+    // Spelled in a way sett wouldn't write back: only a real change may rewrite it.
+    let f = open_board(cx, &[("a", "Todo", 1.0, "labels: [\"bug\",   docs]\n")]);
+    let before = snapshot(&task_path(&f, "a"));
+    let same = vec!["bug".to_string(), "docs".to_string()];
+
+    cx.update(|cx| {
+        f.model
+            .update(cx, |m, cx| m.set_task_labels("inbox", "a", &same, cx))
+    })
+    .unwrap();
+
+    assert_eq!(snapshot(&task_path(&f, "a")), before);
+}
+
+#[gpui_kit::test]
+fn a_task_with_unreadable_frontmatter_has_a_disabled_field(cx: &mut TestAppContext) {
+    let f = open_board(cx, &[("a", "Todo", 1.0, "")]);
+    fs::write(task_path(&f, "a"), "---\ntitle: [oops\n---\nbody\n").unwrap();
+    let before = snapshot(&task_path(&f, "a"));
+    cx.update(|cx| {
+        f.model.update(cx, |m, cx| {
+            m.apply_change(
+                Change::Task {
+                    project: "inbox".into(),
+                    slug: "a".into(),
+                },
+                cx,
+            )
+        })
+    });
+    open_task(cx, &f, "a");
+
+    search_labels(cx, &f, "ui");
+    press(cx, &f, "enter");
+
+    assert_eq!(snapshot(&task_path(&f, "a")), before);
 }

@@ -45,6 +45,7 @@ fn marked_block_is_replaced_and_text_outside_survives() {
     assert!(text.ends_with("\n\nmy outro\n"));
     assert!(!text.contains("old wording"));
     assert!(text.contains("templates/<slug>.md"));
+    assert!(text.contains("labels:"), "marked files get the Labels docs");
 }
 
 #[test]
