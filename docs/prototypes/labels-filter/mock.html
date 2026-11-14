@@ -1,0 +1,66 @@
+<!doctype html>
+<!-- PROTOTYPE (labels-filter), throwaway. HTML stand-in for the real window
+     (screen capture isn't available in the agent session). Copies gpui-kit
+     0.9.1's default theme and sett's Board layout: page header + underline
+     Board/Notes tabs, muted Columns with name + count, quick add, Cards.
+     ?v=A|B|C  &state=off|on|open|empty  &theme=dark -->
+<html><head><meta charset="utf-8"><style>
+:root{--bg:#fff;--fg:#0a0a0a;--border:#e5e5e5;--muted:#737373;--sec:#e5e5e5;--panel:#f5f5f5;--danger:#ef4444;--accent:#f5f5f5;--pop:#fff}
+.dark{--bg:#0a0a0a;--fg:#fafafa;--border:#262626;--muted:#a3a3a3;--sec:#262626;--panel:#171717;--danger:#f87171;--accent:#262626;--pop:#0a0a0a}
+body{margin:0;font:14px -apple-system,system-ui,sans-serif;background:var(--bg);color:var(--fg)}
+.wrap{width:1000px;position:relative}
+.cap{font-size:12px;color:var(--muted);padding:8px 16px;border-bottom:1px dashed var(--border)}
+.head{padding:14px 16px 0}
+.pname{font-size:18px;font-weight:600}
+.tabrow{display:flex;align-items:flex-end;gap:16px;border-bottom:1px solid var(--border);margin-top:8px}
+.tab{padding:6px 2px;font-size:14px;color:var(--muted)}.tab.on{color:var(--fg);border-bottom:2px solid var(--fg)}
+.sp{flex:1}
+.toolbar{display:flex;align-items:center;gap:8px;padding:12px 16px 0}
+.board{display:flex;gap:12px;padding:12px 16px 16px}
+.col{width:288px;flex:none;background:var(--panel);border-radius:8px;padding-bottom:8px;display:flex;flex-direction:column;gap:8px;min-height:300px}
+.colh{display:flex;gap:8px;align-items:center;padding:8px 12px 0;font-size:14px;font-weight:600}
+.cnt{font-size:12px;font-weight:400;color:var(--muted)}
+.qa{margin:0 8px;border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:13px;color:var(--muted);background:var(--bg)}
+.cards{display:flex;flex-direction:column;gap:8px;padding:0 8px}
+.card{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px 12px;display:flex;flex-direction:column;gap:4px}
+.chips{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.tag{font-size:10px;line-height:14px;padding:1px 6px;border-radius:3px;border:1px solid;white-space:nowrap;display:inline-flex;align-items:center;gap:3px}
+.tag.big{font-size:12px;line-height:16px;padding:1px 6px}
+.tag.off{background:transparent!important;color:var(--muted)!important;border-color:var(--border)!important}
+.more{font-size:10px;color:var(--muted)}
+.meta{font-size:12px;color:var(--muted)}
+.empty{font-size:12px;color:var(--muted);padding:4px 12px}
+.btn{font-size:13px;border:1px solid var(--border);border-radius:6px;padding:3px 8px;display:inline-flex;gap:6px;align-items:center;background:var(--bg)}
+.btn.ghost{border-color:transparent;color:var(--muted)}
+.btn.active{border-color:var(--fg)}
+.pop{position:absolute;background:var(--pop);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px #0002;width:220px;padding:4px;font-size:13px;z-index:5}
+.pop .s{border:1px solid var(--border);border-radius:6px;padding:4px 8px;color:var(--muted);margin-bottom:4px}
+.pop .r{display:flex;gap:8px;align-items:center;padding:4px 8px;border-radius:4px}.pop .r.hl{background:var(--accent)}
+.ck{width:14px;color:var(--fg)}
+.x{opacity:.7}
+.note{font-size:12px;color:var(--muted);padding:0 16px 12px}
+</style></head><body><div class="wrap" id="root"></div><script>
+const P={orange:['#fff7ed','#fed7aa','#ea580c','#431407','#9a3412','#fdba74'],amber:['#fffbeb','#fde68a','#d97706','#451a03','#92400e','#fcd34d'],lime:['#f7fee7','#d9f99d','#65a30d','#1a2e05','#3f6212','#bef264'],emerald:['#ecfdf5','#a7f3d0','#059669','#022c22','#065f46','#6ee7b7'],cyan:['#ecfeff','#a5f3fc','#0891b2','#083344','#155e75','#67e8f9'],blue:['#eff6ff','#bfdbfe','#2563eb','#172554','#1e40af','#93c5fd'],violet:['#f5f3ff','#ddd6fe','#7c3aed','#2e1065','#5b21b6','#c4b5fd'],pink:['#fdf2f8','#fbcfe8','#db2777','#500724','#9d174d','#f9a8d4']};
+const N=Object.keys(P);
+function color(l){let h=0x811c9dc5>>>0;for(const b of new TextEncoder().encode(l.toLowerCase())){h^=b;h=Math.imul(h,0x01000193)>>>0}return N[h%8]}
+const q=new URLSearchParams(location.search),v=q.get('v')||'A',st=q.get('state')||'off',dark=q.get('theme')==='dark';
+if(dark)document.body.classList.add('dark');
+function tag(l,o={}){const c=P[color(l)];const s=dark?`background:${c[3]}80;border-color:${c[4]}80;color:${c[5]}`:`background:${c[0]};border-color:${c[1]};color:${c[2]}`;return `<span class="tag ${o.big?'big':''} ${o.off?'off':''}" style="${s}">${l}${o.x?'<span class=x>✕</span>':''}</span>`}
+const tasks={Todo:[{t:'Renew passport',l:['errand','travel','urgent'],m:'⚠ Oct 20'},{t:'Fix login crash on wake from sleep',l:['bug','sett'],m:'📅 Nov 20 · ✓ 1/2'},{t:'Plan Lisbon trip',l:['travel','family','budget','summer','flights']},{t:'Call the bank',l:['finance']},{t:'Order new glasses',l:[]}],Doing:[{t:'Book dentist',l:['health']},{t:'Water the plants',l:[]}],Done:[{t:'File tax return',l:['finance']},{t:'Pay council tax',l:['finance','errand']}]};
+const all=[...new Set(Object.values(tasks).flat().flatMap(t=>t.l))].sort();
+const picked=st==='off'?[]:st==='empty'?['bug']:['travel','errand'];
+const match=t=>!picked.length||t.l.some(l=>picked.includes(l));
+function card(t){const sh=t.l.slice(0,3),more=t.l.length-3;return `<div class="card"><div>${t.t}</div>${t.l.length?`<div class="chips">${sh.map(l=>tag(l)).join('')}${more>0?`<span class="more">+${more}</span>`:''}</div>`:''}${t.m?`<div class="meta">${t.m}</div>`:''}</div>`}
+function col(n,ts){const m=ts.filter(match);const cnt=picked.length?`${m.length} of ${ts.length}`:`${ts.length}`;return `<div class="col"><div class="colh">${n}<span class="cnt">${cnt}</span></div><div class="qa">Add a Task</div><div class="cards">${m.map(card).join('')}${picked.length&&!m.length?'<div class="empty">No matching Tasks</div>':''}</div></div>`}
+const board=`<div class="board">${Object.entries(tasks).map(([n,t])=>col(n,t)).join('')}</div>`;
+function popup(x,y){return `<div class="pop" style="left:${x}px;top:${y}px"><div class="s">Search Labels</div>${all.map((l,i)=>`<div class="r ${i==0?'hl':''}"><span class="ck">${picked.includes(l)?'✓':''}</span>${tag(l)}</div>`).join('')}</div>`}
+const names={A:'A: "Labels" button at the right end of the Board/Notes tab row; picked count on the button',B:'B: filter row on the Board above the Columns; picked Labels shown as removable chips',C:'C: every Label of the Project as a toggle chip across the top of the Board'};
+const stn={off:'filter off',on:'"travel" and "errand" picked',open:'picking Labels',empty:'"bug" picked: Doing and Done have no match'};
+let tabExtra='',tool='';
+const on=picked.length>0;
+if(v==='A'){tabExtra=`<span class="sp"></span><span style="padding-bottom:4px;display:flex;gap:6px">${on?'<span class="btn ghost">Clear</span>':''}<span class="btn ${on?'active':''}">⛉ Labels${on?` · ${picked.length}`:''}</span></span>`}
+if(v==='B'){tool=`<div class="toolbar">${on?`<span class="btn">⛉ Labels</span>${picked.map(l=>tag(l,{big:1,x:1})).join('')}<span class="btn ghost">Clear</span>`:`<span class="btn ghost">⛉ Filter by Label</span>`}</div>`}
+if(v==='C'){tool=`<div class="toolbar"><span class="meta" style="margin-right:4px">Labels</span>${all.map(l=>tag(l,{big:1,off:on&&!picked.includes(l)})).join('')}${on?'<span class="btn ghost">Clear</span>':''}</div>`}
+let pop='';if(st==='open'){pop=v==='A'?popup(760,128):v==='B'?popup(16,150):''}
+document.getElementById('root').innerHTML=`<div class="cap">Variant ${names[v]} — ${stn[st]} (${dark?'dark':'light'})</div><div class="head"><div class="pname">Inbox</div><div class="tabrow"><span class="tab on">Board</span><span class="tab">Notes</span>${tabExtra}</div></div>${tool}${board}${pop}${v==='C'&&st==='open'?'<div class="note">C has no popup: clicking a chip toggles it.</div>':''}`;
+</script></body></html>
