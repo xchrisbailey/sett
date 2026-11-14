@@ -115,12 +115,15 @@ impl TaskView {
                 let due = value.start().and_then(from_chrono);
                 this.set_due(due, window, cx);
             }),
-            cx.subscribe_in(&labels, window, |this, _, event, window, cx| {
+            cx.subscribe_in(&labels, window, |this, labels, event, window, cx| {
                 let ComboboxEvent::Change(values) = event else {
                     return;
                 };
                 let picked: Vec<String> = values.iter().map(ToString::to_string).collect();
                 this.set_labels(picked, window, cx);
+                // A pick finishes what was typed; `sync` keeps the query
+                // only for changes that aren't the user's pick.
+                labels.update(cx, |combobox, cx| combobox.set_query("", window, cx));
             }),
             cx.observe_in(&model, window, |this, _, window, cx| this.sync(window, cx)),
         ];
@@ -254,8 +257,16 @@ impl TaskView {
         let view = cx.entity().downgrade();
         let selected: Vec<SharedString> = labels.into_iter().map(SharedString::from).collect();
         self.labels.update(cx, |combobox, cx| {
+            // Setting values and items both discard the search text, which
+            // would wipe a half-typed Label whenever another Task changes.
+            let query = combobox.query(cx);
             combobox.set_items(LabelOptions::new(space_labels, view), window, cx);
-            combobox.set_selected_values(&selected, window, cx);
+            if combobox.selected_values() != selected {
+                combobox.set_selected_values(&selected, window, cx);
+            }
+            if !query.is_empty() {
+                combobox.set_query(query, window, cx);
+            }
         });
         cx.notify();
     }

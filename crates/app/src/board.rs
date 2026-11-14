@@ -241,13 +241,19 @@ impl BoardView {
                 options.push(picked.clone());
             }
         }
-        self.options = options.clone();
-        let items = options.into_iter().map(LabelOption).collect();
+        let options_changed = options != self.options;
         let picked = self.picked.clone();
         self.picker.update(cx, |picker, cx| {
-            picker.set_items(items, window, cx);
-            picker.set_selected_values(&picked, window, cx);
+            // Pushing values resets the popup, so only do it for a real change.
+            if options_changed {
+                let items = options.iter().cloned().map(LabelOption).collect();
+                picker.set_items(items, window, cx);
+            }
+            if options_changed || picker.selected_values() != picked {
+                picker.set_selected_values(&picked, window, cx);
+            }
         });
+        self.options = options;
     }
 
     fn set_picked(&mut self, picked: Vec<String>, window: &mut Window, cx: &mut Context<Self>) {
