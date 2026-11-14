@@ -3,24 +3,30 @@ use std::collections::HashMap;
 use std::io;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::combobox::{Combobox, ComboboxEvent, ComboboxState};
 use gpui_kit::component::dialog::DialogFooter;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::scroll::ScrollableElement as _;
+use gpui_kit::component::searchable_list::SearchableListItem;
 use gpui_kit::component::{
-    ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _, WindowExt as _, h_flex, v_flex,
+    ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, StyledExt as _,
+    WindowExt as _, h_flex, v_flex,
 };
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, ElementId, Entity, EventEmitter, FocusHandle,
     Focusable as _, InteractiveElement as _, IntoElement, KeyBinding, ParentElement as _, Render,
     Role, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription,
-    TestSupportExt as _, Window, actions, div, prelude::FluentBuilder as _, px,
+    TestSupportExt as _, Window, actions, div, prelude::FluentBuilder as _, px, rems,
 };
 use markdown_editor::CalloutKind;
 
+use crate::icons::FILTER_ICON;
 use crate::labels::label_chip;
-use sett_store::{Board, BoardColumn, CalloutKind as TaskCalloutKind, Date, Task, TaskCallout};
+use sett_store::{
+    Board, BoardColumn, CalloutKind as TaskCalloutKind, Date, Task, TaskCallout, labels_of,
+};
 
 use crate::app_model::{AppModel, Selection};
 use crate::confirm_delete::{ITEM_CONSEQUENCE, confirm_delete};
@@ -47,6 +53,14 @@ pub(crate) struct BoardView {
     /// The Project shown, by slug. Changing it resets the view state below.
     project: Option<String>,
     show_all_done: bool,
+    /// The Labels the Board is filtered to, in the order picked. Never saved.
+    picked: Vec<String>,
+    /// Tasks quick-added while filtered, shown until the picked set changes so
+    /// a new Card never vanishes as it's added.
+    added: Vec<String>,
+    /// The Project's Labels plus any picked one that has since vanished.
+    options: Vec<String>,
+    picker: Entity<ComboboxState<Vec<LabelOption>>>,
     selected_task: Option<String>,
     /// Quick-add boxes by Column name.
     quick_adds: HashMap<String, QuickAdd>,
@@ -54,6 +68,27 @@ pub(crate) struct BoardView {
     card_focus: HashMap<String, FocusHandle>,
     column_dialog: Option<Subscription>,
     _observe: Subscription,
+    _picker_events: Subscription,
+}
+
+/// A row of the Label picker: the Label drawn as its chip.
+#[derive(Clone)]
+struct LabelOption(String);
+
+impl SearchableListItem for LabelOption {
+    type Value = String;
+
+    fn title(&self) -> SharedString {
+        SharedString::from(self.0.clone())
+    }
+
+    fn render(&self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        label_chip(&self.0)
+    }
+
+    fn value(&self) -> &String {
+        &self.0
+    }
 }
 
 struct QuickAdd {
@@ -98,15 +133,28 @@ impl BoardView {
         let observe = cx.observe_in(&model, window, |this, _, window, cx| {
             this.sync(window, cx);
         });
+        let picker = cx.new(|cx| ComboboxState::new(Vec::new(), vec![], window, cx).multiple(true));
+        let picker_events = cx.subscribe_in(&picker, window, |this, _, event, _, cx| {
+            if let ComboboxEvent::Change(values) = event {
+                this.picked = values.clone();
+                this.added.clear();
+                cx.notify();
+            }
+        });
         let mut view = BoardView {
             model,
             project: None,
             show_all_done: false,
+            picked: Vec::new(),
+            added: Vec::new(),
+            options: Vec::new(),
+            picker,
             selected_task: None,
             quick_adds: HashMap::new(),
             card_focus: HashMap::new(),
             column_dialog: None,
             _observe: observe,
+            _picker_events: picker_events,
         };
         view.sync(window, cx);
         view
@@ -136,10 +184,13 @@ impl BoardView {
         if project != self.project {
             self.project = project;
             self.show_all_done = false;
+            self.picked.clear();
+            self.added.clear();
             self.selected_task = None;
             self.quick_adds.clear();
             self.card_focus.clear();
         }
+        self.refresh_picker(window, cx);
         self.card_focus.retain(|slug, _| slugs.contains(slug));
         for slug in slugs {
             self.card_focus
@@ -169,6 +220,51 @@ impl BoardView {
         }
     }
 
+    /// Reloads the picker's options from the Project's Tasks, so they follow
+    /// edits made in or outside sett. A picked Label that no Task has any more
+    /// stays listed, so the filter never silently widens.
+    fn refresh_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let model = self.model.read(cx);
+        let tasks = self
+            .project
+            .as_deref()
+            .map(|p| model.index().tasks(p))
+            .unwrap_or_default();
+        let mut options = labels_of(tasks);
+        for picked in &self.picked {
+            let lower = picked.to_lowercase();
+            if !options.iter().any(|o| o.to_lowercase() == lower) {
+                options.push(picked.clone());
+            }
+        }
+        options.sort_by_key(|o| o.to_lowercase());
+        self.options = options.clone();
+        let items = options.into_iter().map(LabelOption).collect();
+        let picked = self.picked.clone();
+        self.picker.update(cx, |picker, cx| {
+            picker.set_items(items, window, cx);
+            picker.set_selected_values(&picked, window, cx);
+        });
+    }
+
+    fn set_picked(&mut self, picked: Vec<String>, window: &mut Window, cx: &mut Context<Self>) {
+        self.picked = picked;
+        self.added.clear();
+        self.refresh_picker(window, cx);
+        cx.notify();
+    }
+
+    /// Whether the filter lets this Task's Card show.
+    fn shows(&self, task: &Task) -> bool {
+        self.picked.is_empty()
+            || self.added.contains(&task.slug)
+            || task.labels.iter().any(|label| {
+                self.picked
+                    .iter()
+                    .any(|picked| picked.to_lowercase() == label.to_lowercase())
+            })
+    }
+
     fn quick_add(
         &mut self,
         column: &str,
@@ -183,11 +279,22 @@ impl BoardView {
         if title.is_empty() {
             return;
         }
-        let result = self
-            .model
-            .update(cx, |w, cx| w.create_task(&project, column, &title, cx));
+        // One picked Label goes on the new Task; with several there is no
+        // telling which was meant, so it gets none.
+        let label = match self.picked.as_slice() {
+            [only] => Some(only.clone()),
+            _ => None,
+        };
+        let result = self.model.update(cx, |w, cx| {
+            w.create_task(&project, column, &title, label.as_deref(), cx)
+        });
         match result {
-            Ok(()) => input.update(cx, |input, cx| input.set_value("", window, cx)),
+            Ok(slug) => {
+                if !self.picked.is_empty() {
+                    self.added.push(slug);
+                }
+                input.update(cx, |input, cx| input.set_value("", window, cx));
+            }
             Err(err) => show_error("Couldn't add the Task", err, window, cx),
         }
     }
@@ -255,7 +362,23 @@ impl BoardView {
 
     /// Focuses a Card, for when its Task view closes.
     pub(crate) fn focus_card(&mut self, slug: &str, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(handle) = self.card_focus.get(slug) {
+        let hidden = self
+            .project
+            .as_deref()
+            .and_then(|p| {
+                self.model
+                    .read(cx)
+                    .index()
+                    .tasks(p)
+                    .into_iter()
+                    .find(|t| t.slug == slug)
+            })
+            .is_some_and(|task| !self.shows(task));
+        if hidden {
+            // The filter hides its Card, so there's nothing to focus there.
+            let picker = self.picker.clone();
+            picker.update(cx, |picker, cx| picker.focus(window, cx));
+        } else if let Some(handle) = self.card_focus.get(slug) {
             handle.focus(window, cx);
         }
         cx.notify();
@@ -372,11 +495,18 @@ impl BoardView {
     ) -> impl IntoElement + use<> {
         let name = column.name().to_string();
         let is_last = ix + 1 == board.columns().len();
-        let (shown, hidden): (Vec<&Task>, Vec<&Task>) = column
+        let filtering = !self.picked.is_empty();
+        let matching: Vec<&Task> = column
             .tasks()
             .iter()
+            .copied()
+            .filter(|t| self.shows(t))
+            .collect();
+        let (shown, hidden): (Vec<&Task>, Vec<&Task>) = matching
+            .iter()
             .partition(|t| !is_last || self.show_all_done || t.is_recently_done(today));
-        let has_older = is_last && column.tasks().iter().any(|t| !t.is_recently_done(today));
+        let has_older = is_last && matching.iter().any(|t| !t.is_recently_done(today));
+        let count = filtering.then_some(matching.len());
 
         let cards = v_flex()
             .id("cards")
@@ -385,6 +515,18 @@ impl BoardView {
             .gap_2()
             .px_2()
             .pb_2()
+            .when(filtering && matching.is_empty(), |cards| {
+                cards.child(
+                    div()
+                        .id("no-matches")
+                        .test_support()
+                        .aria_label("No matching Tasks")
+                        .px_1()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("No matching Tasks"),
+                )
+            })
             .children(
                 shown
                     .iter()
@@ -424,7 +566,7 @@ impl BoardView {
                         this.move_card(&card.slug, &drop_name, None, window, cx);
                     }))
             })
-            .child(self.render_column_header(board, ix, column, locked, cx))
+            .child(self.render_column_header(board, ix, column, locked, count, cx))
             .when_some(
                 self.quick_adds.get(&name).filter(|_| !locked),
                 |col, quick_add| {
@@ -444,9 +586,15 @@ impl BoardView {
         ix: usize,
         column: &BoardColumn,
         locked: bool,
+        matching: Option<usize>,
         cx: &Context<Self>,
     ) -> impl IntoElement + use<> {
         let name = column.name().to_string();
+        let total = column.tasks().len();
+        let count = match matching {
+            Some(matching) => format!("{matching} of {total}"),
+            None => total.to_string(),
+        };
         let last_ix = board.columns().len() - 1;
         let deletable = board.is_column_deletable(&name);
         let view = cx.entity().downgrade();
@@ -486,9 +634,12 @@ impl BoardView {
             )
             .child(
                 div()
+                    .id("column-count")
+                    .test_support()
+                    .aria_label(count.clone())
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(column.tasks().len().to_string()),
+                    .child(count),
             )
             .child(div().flex_1())
             .when(!locked, |header| header.child(menu))
@@ -802,6 +953,108 @@ impl Render for BoardView {
                     .into_any_element()
             })
             .collect();
+        let filter_row = self.render_filter_row(cx);
+        v_flex()
+            .id("board-view")
+            .flex_1()
+            .min_h_0()
+            .child(filter_row)
+            .child(self.render_columns(columns, locked, cx))
+            .into_any_element()
+    }
+}
+
+impl BoardView {
+    /// The row above the Columns: the Label picker, then what it filters to.
+    fn render_filter_row(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let picked = self.picked.len();
+        let none_to_pick = self.options.is_empty();
+        let name: SharedString = match picked {
+            0 => "Filter by Label".into(),
+            n => format!("Labels, {n} picked").into(),
+        };
+        let trigger_name = name.clone();
+        let picker = Combobox::new(&self.picker)
+            .small()
+            .disabled(none_to_pick)
+            .menu_width(rems(14.))
+            // The Button is the visible control; the Combobox keeps its focus
+            // ring and opens on a click anywhere on it.
+            .bg(cx.theme().transparent)
+            .border_color(cx.theme().transparent)
+            .p_0()
+            .render_trigger(move |_, _, _| {
+                let button = Button::new("label-filter")
+                    .small()
+                    .icon(Icon::new(FILTER_ICON))
+                    .accessibility_label(trigger_name.clone());
+                if picked == 0 {
+                    button
+                        .ghost()
+                        .label("Filter by Label")
+                        .disabled(none_to_pick)
+                        .when(none_to_pick, |b| b.tooltip("No Labels in this Project"))
+                } else {
+                    button.outline().label("Labels")
+                }
+            });
+        let chips = self.picked.iter().enumerate().map(|(ix, label)| {
+            let remove = label.clone();
+            let accessible = format!("Remove {label} from the filter");
+            h_flex()
+                .gap_0p5()
+                .items_center()
+                .child(label_chip(label))
+                .child(
+                    Button::new(ElementId::Name(format!("remove-label-{ix}").into()))
+                        .ghost()
+                        .xsmall()
+                        .icon(IconName::Close)
+                        .accessibility_label(accessible)
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            let rest = this
+                                .picked
+                                .iter()
+                                .filter(|p| **p != remove)
+                                .cloned()
+                                .collect();
+                            this.set_picked(rest, window, cx);
+                        })),
+                )
+        });
+        h_flex()
+            .id("label-filter-row")
+            .px_4()
+            .pt_4()
+            .gap_2()
+            .flex_wrap()
+            .items_center()
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .w(if picked == 0 { rems(9.5) } else { rems(6.5) })
+                    .child(picker),
+            )
+            .children(chips)
+            .when(picked > 0, |row| {
+                row.child(
+                    Button::new("clear-label-filter")
+                        .ghost()
+                        .small()
+                        .label("Clear")
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.set_picked(Vec::new(), window, cx);
+                        })),
+                )
+            })
+    }
+
+    fn render_columns(
+        &self,
+        columns: Vec<AnyElement>,
+        locked: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
         h_flex()
             .id("board")
             .flex_1()
@@ -825,7 +1078,6 @@ impl Render for BoardView {
                 )
             })
             .overflow_x_scrollbar()
-            .into_any_element()
     }
 }
 

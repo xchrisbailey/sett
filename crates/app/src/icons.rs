@@ -204,9 +204,10 @@ project_icons![
     LayoutDashboard,
 ];
 
-gpui_kit::assets::icon_assets!(NavIconAssets, [LayoutTemplate]);
+gpui_kit::assets::icon_assets!(NavIconAssets, [LayoutTemplate, ListFilter]);
 
 pub(crate) const TEMPLATES_ICON: IconName = IconName::LayoutTemplate;
+pub(crate) const FILTER_ICON: IconName = IconName::ListFilter;
 
 /// What a Project shows when it has no icon, or one outside the curated set.
 pub(crate) const DEFAULT_ICON: IconName = IconName::Folder;

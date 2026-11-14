@@ -498,19 +498,21 @@ impl AppModel {
         changed
     }
 
-    /// Quick-adds a Task at the top of a Column of the Project's Board.
+    /// Quick-adds a Task at the top of a Column of the Project's Board, with
+    /// `label` if given, and returns its slug.
     pub fn create_task(
         &mut self,
         project: &str,
         column: &str,
         title: &str,
+        label: Option<&str>,
         cx: &mut Context<Self>,
-    ) -> io::Result<()> {
+    ) -> io::Result<String> {
         let task =
             self.store
-                .create_task_in(self.space(), project, column, title, today(), None)?;
+                .create_task_in(self.space(), project, column, title, today(), label)?;
         self.reload(vec![task_change(project, &task.slug)], cx);
-        Ok(())
+        Ok(task.slug)
     }
 
     /// Moves a Task on its Project's Board into `column`, before the Task
