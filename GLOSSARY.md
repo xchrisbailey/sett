@@ -32,6 +32,10 @@ _Avoid_: Todo, ticket, issue
 A Task's compact summary on a Board. A Card is a view of a Task, never a separate thing.
 _Avoid_: Tile, ticket
 
+**Label**:
+A short word or phrase the user or an agent puts on a Task to group it with others, shown on its Card. Labels are free text: a Label exists while some Task in the Space has it.
+_Avoid_: Tag, category, chip
+
 **Board**:
 The kanban view of one Project's Tasks, arranged in Columns. Each Project has exactly one Board.
 _Avoid_: Kanban, list
