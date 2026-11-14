@@ -1,0 +1,56 @@
+<!doctype html>
+<!-- PROTOTYPE (labels-look), throwaway. An HTML stand-in for the real window,
+     because screen capture isn't available in the agent's session. Colours and
+     sizes copy gpui-kit 0.9.1's default theme and Tag: small Tag = 10px text,
+     6px x 2px padding, radius/2; Card = 12px x 8px padding, 14px title, 12px meta.
+     Open with ?v=A|B|C&theme=light|dark&view=board|task -->
+<html><head><meta charset="utf-8"><style>
+:root{--bg:#fff;--fg:#0a0a0a;--border:#e5e5e5;--muted:#737373;--sec:#e5e5e5;--secfg:#171717;--panel:#fafafa;--danger:#ef4444;--radius:6px}
+.dark{--bg:#0a0a0a;--fg:#fafafa;--border:#262626;--muted:#a3a3a3;--sec:#262626;--secfg:#fafafa;--panel:#111;--danger:#f87171}
+body{margin:0;font:14px -apple-system,system-ui,sans-serif;background:var(--bg);color:var(--fg)}
+.wrap{padding:20px;width:860px}
+h1{font-size:13px;color:var(--muted);font-weight:500;margin:0 0 12px}
+.board{display:flex;gap:12px}
+.col{flex:1;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:8px}
+.colh{font-size:13px;font-weight:600;padding:2px 4px}
+.card{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:8px 12px;display:flex;flex-direction:column;gap:4px}
+.title{font-size:14px}
+.meta{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12px;color:var(--muted)}
+.meta .over{color:var(--danger)}
+.chips{display:flex;flex-wrap:wrap;gap:4px}
+.tag{font-size:10px;line-height:14px;padding:1px 6px;border-radius:3px;border:1px solid;max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:inline-flex;align-items:center;gap:2px}
+.tag.sec{background:var(--sec);color:var(--secfg);border-color:var(--border)}
+.dot{display:inline-flex;align-items:center;gap:4px;max-width:110px}
+.dot i{width:7px;height:7px;border-radius:50%;flex:none}
+.dot span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.callout{font-size:12px;border-left:2px solid #f59e0b;padding-left:6px;color:var(--muted)}
+.task{width:640px}
+.field{display:flex;gap:12px;align-items:flex-start;margin:6px 12px}
+.flabel{width:80px;font-size:14px;color:var(--muted);padding-top:5px}
+.fctl{width:224px;border:1px solid var(--border);border-radius:var(--radius);padding:3px 4px;display:flex;flex-wrap:wrap;gap:4px;min-height:22px;align-items:center;font-size:13px}
+.fctl.wide{width:360px}
+.ph{color:var(--muted);padding:0 4px}
+.x{opacity:.7;font-size:11px;margin-left:2px}
+.ttitle{font-size:20px;font-weight:600;margin:4px 12px 10px}
+</style></head><body><div class="wrap" id="root"></div><script>
+const P={orange:['#fff7ed','#fed7aa','#ea580c','#431407','#9a3412','#fdba74','#f97316'],amber:['#fffbeb','#fde68a','#d97706','#451a03','#92400e','#fcd34d','#f59e0b'],lime:['#f7fee7','#d9f99d','#65a30d','#1a2e05','#3f6212','#bef264','#84cc16'],emerald:['#ecfdf5','#a7f3d0','#059669','#022c22','#065f46','#6ee7b7','#10b981'],cyan:['#ecfeff','#a5f3fc','#0891b2','#083344','#155e75','#67e8f9','#06b6d4'],blue:['#eff6ff','#bfdbfe','#2563eb','#172554','#1e40af','#93c5fd','#3b82f6'],violet:['#f5f3ff','#ddd6fe','#7c3aed','#2e1065','#5b21b6','#c4b5fd','#8b5cf6'],pink:['#fdf2f8','#fbcfe8','#db2777','#500724','#9d174d','#f9a8d4','#ec4899']};
+const NAMES=Object.keys(P);
+function color(l){let h=0x811c9dc5>>>0;for(const b of new TextEncoder().encode(l.toLowerCase())){h^=b;h=Math.imul(h,0x01000193)>>>0}return NAMES[h%8]}
+const q=new URLSearchParams(location.search),v=q.get('v')||'A',dark=q.get('theme')==='dark',view=q.get('view')||'board';
+if(dark)document.body.classList.add('dark');
+function tag(l,colored,x){if(!colored)return `<span class="tag sec">${l}${x?'<span class=x>✕</span>':''}</span>`;const c=P[color(l)];const s=dark?`background:${c[3]}80;border-color:${c[4]}80;color:${c[5]}`:`background:${c[0]};border-color:${c[1]};color:${c[2]}`;return `<span class="tag" style="${s}">${l}${x?'<span class=x>✕</span>':''}</span>`}
+function dot(l){return `<span class="dot"><i style="background:${P[color(l)][6]}"></i><span>${l}</span></span>`}
+const cols={Todo:[{t:'Renew passport',l:['errand','travel','urgent'],due:'Oct 20',over:1,body:'Photos are in the drawer.'},{t:'Fix login crash on wake from sleep',l:['bug','sett','needs reproduction steps from the forum thread'],due:'Nov 20',call:'Crashes only on the M1 laptop.',check:'1/2'},{t:'Plan Lisbon trip',l:['travel','family','budget','summer','flights','hotels']}],Doing:[{t:'Book dentist',l:['health']},{t:'Water the plants',l:[]}],Done:[{t:'File tax return',l:['finance']}]};
+function card(c){const meta=[];if(c.due)meta.push(`<span class="${c.over?'over':''}">${c.over?'⚠':'📅'} ${c.due}</span>`);if(c.check)meta.push(`<span>✓ ${c.check}</span>`);if(v==='C')c.l.forEach(l=>meta.push(dot(l)));
+return `<div class="card"><div class="title">${c.t}</div>${(v!=='C'&&c.l.length)?`<div class="chips">${c.l.map(l=>tag(l,v==='A')).join('')}</div>`:''}${c.call?`<div class="callout">${c.call}</div>`:''}${meta.length?`<div class="meta">${meta.join('')}</div>`:''}</div>`}
+const names={A:'A: coloured chips, own row under the title',B:'B: neutral chips, own row under the title',C:'C: coloured dot + muted text, in the meta row'};
+const root=document.getElementById('root');
+if(view==='board'){root.innerHTML=`<h1>Variant ${names[v]} (${dark?'dark':'light'})</h1><div class="board">${Object.entries(cols).map(([n,cs])=>`<div class="col"><div class="colh">${n}</div>${cs.map(card).join('')}</div>`).join('')}</div>`}
+else{const colored=v!=='B';const f=(l,w)=>`<div class="fctl ${w||''}">${l.map(x=>tag(x,colored,1)).join('')}<span class="ph">${l.length?'Add…':'Add a label'}</span></div>`;
+root.innerHTML=`<h1>Task view Labels field, ${colored?'coloured':'neutral'} (${dark?'dark':'light'})</h1><div class="task"><div class="ttitle">Fix login crash on wake from sleep</div>
+<div class="field"><div class="flabel">Column</div><div class="fctl">Todo</div></div>
+<div class="field"><div class="flabel">Due</div><div class="fctl">2026-11-20</div></div>
+<div class="field"><div class="flabel">Labels</div>${f(['bug','sett','needs reproduction steps from the forum thread'])}</div>
+<div class="field"><div class="flabel">Labels</div>${f([])}<span style="color:var(--muted);font-size:12px;padding-top:5px">← no Labels yet</span></div>
+<div class="field"><div class="flabel">Labels</div>${f(['travel','family','budget','summer','flights','hotels'])}<span style="color:var(--muted);font-size:12px;padding-top:5px">← many: chips wrap, field grows</span></div></div>`}
+</script></body></html>
