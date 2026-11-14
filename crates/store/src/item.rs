@@ -1,6 +1,7 @@
+use std::collections::HashSet;
 use std::time::SystemTime;
 
-use serde_yaml_ng::Mapping;
+use serde_yaml_ng::{Mapping, Value};
 
 use crate::callout::{self, TaskCallout};
 use crate::frontmatter::Document;
@@ -21,6 +22,8 @@ pub struct Task {
     pub created: Option<Date>,
     pub due: Option<Date>,
     pub done: Option<Date>,
+    /// Free-text tags, already normalised when read; see [`normalize_labels`].
+    pub labels: Vec<String>,
     pub body: String,
     /// When the file was last written, by sett or anyone else. `None` for a
     /// file whose time can't be read.
@@ -56,6 +59,7 @@ impl Task {
             created: doc.date("created"),
             due: doc.date("due"),
             done: doc.date("done"),
+            labels: read_labels(&doc),
             body: doc.body.clone(),
             modified: None,
             fields: doc.fields,
@@ -75,6 +79,8 @@ impl Task {
         doc.set_opt("created", self.created.map(|d| d.to_string()));
         doc.set_opt("due", self.due.map(|d| d.to_string()));
         doc.set_opt("done", self.done.map(|d| d.to_string()));
+        let labels = normalize_labels(&self.labels);
+        doc.set_opt("labels", (!labels.is_empty()).then(|| Value::from(labels)));
         doc.body = self.body.clone();
         doc
     }
@@ -147,6 +153,45 @@ impl Task {
         let changed = done != self.done;
         self.done = done;
         changed
+    }
+}
+
+/// Trims each Label, drops empty ones and later duplicates that match ignoring
+/// case. The first spelling wins and the order is kept, so hand-edited files
+/// and sett agree on what a Task's Labels are.
+pub fn normalize_labels<S: AsRef<str>>(labels: &[S]) -> Vec<String> {
+    let mut seen = HashSet::new();
+    labels
+        .iter()
+        .map(|l| l.as_ref().trim())
+        .filter(|l| !l.is_empty() && seen.insert(l.to_lowercase()))
+        .map(str::to_string)
+        .collect()
+}
+
+/// Every Label used by `tasks` (done ones included), once per case-insensitive
+/// spelling, sorted ignoring case. Serves a Project's filter options and a
+/// Space's suggestions alike.
+pub fn labels_of<'a>(tasks: impl IntoIterator<Item = &'a Task>) -> Vec<String> {
+    let all: Vec<&str> = tasks
+        .into_iter()
+        .flat_map(|t| t.labels.iter().map(String::as_str))
+        .collect();
+    let mut labels = normalize_labels(&all);
+    labels.sort_by_key(|l| l.to_lowercase());
+    labels
+}
+
+/// A YAML list of strings, or a bare string as one Label. Hand-edited files
+/// hold all sorts, so anything else is ignored rather than rejected.
+fn read_labels(doc: &Document) -> Vec<String> {
+    match doc.fields.get("labels") {
+        Some(Value::String(s)) => normalize_labels(&[s]),
+        Some(Value::Sequence(seq)) => {
+            let strings: Vec<&str> = seq.iter().filter_map(Value::as_str).collect();
+            normalize_labels(&strings)
+        }
+        _ => Vec::new(),
     }
 }
 

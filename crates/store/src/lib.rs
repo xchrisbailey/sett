@@ -30,7 +30,7 @@ pub use callout::{CalloutKind, TaskCallout};
 pub use date::Date;
 use frontmatter::Document;
 pub use index::{Change, SpaceIndex, Update};
-pub use item::{JournalEntry, Note, RECENT_DONE_DAYS, Task, Template};
+pub use item::{JournalEntry, Note, RECENT_DONE_DAYS, Task, Template, labels_of, normalize_labels};
 pub use links::{InboundLink, ItemId, Link, LinkTarget};
 pub use settings::{EditorMode, Settings};
 pub use watch::Watcher;
@@ -338,7 +338,8 @@ impl Store {
     }
 
     /// Writes a Task at the top of Column `column`, where the quick-add box
-    /// that creates it sits. In the last Column it is created done.
+    /// that creates it sits. In the last Column it is created done. `label`
+    /// is the one a filtered Board adds so the new Task stays visible.
     pub fn create_task_in(
         &self,
         space: Space,
@@ -346,6 +347,7 @@ impl Store {
         column: &str,
         title: &str,
         today: Date,
+        label: Option<&str>,
     ) -> io::Result<Task> {
         let columns = self.columns_of(space, project)?;
         if !columns.iter().any(|c| c == column) {
@@ -358,6 +360,7 @@ impl Store {
             .unwrap_or(1.0);
         let mut task = self.blank_task(space, project, title, today);
         task.move_to(column, first_order - 1.0, &columns, today);
+        task.labels = normalize_labels(label.as_slice());
         self.write_task_new(task)
     }
 
@@ -528,6 +531,25 @@ impl Store {
         task.fields = doc.fields;
         task.modified = modified(&path);
         Ok(())
+    }
+
+    /// Replaces the Task's Labels, writing only its file, and returns the
+    /// Task as saved.
+    pub fn set_task_labels(
+        &self,
+        space: Space,
+        project: &str,
+        slug: &str,
+        labels: &[String],
+    ) -> io::Result<Task> {
+        check_slug(project)?;
+        check_slug(slug)?;
+        let mut task = self
+            .task(space, project, slug)
+            .ok_or_else(|| not_found(format!("task {slug}")))?;
+        task.labels = normalize_labels(labels);
+        self.save_task(&mut task)?;
+        Ok(task)
     }
 
     pub fn save_note(&self, note: &mut Note) -> io::Result<()> {

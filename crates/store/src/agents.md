@@ -32,7 +32,13 @@ order: 1.5           # position within the column; lower comes first
 created: 2026-01-31
 due: 2026-02-14      # optional
 done: 2026-02-10     # set when the Task enters the last column
+labels: [bug, Urgent] # optional
 ```
+
+`labels` is a YAML list of short free-text Labels. Labels are compared ignoring
+case, so `Bug` and `bug` are the same Label. A Label exists while some Task has
+it: there is no Label list to maintain, and removing a Label from every Task
+removes it. Leave the key out when a Task has none.
 
 Note:
 

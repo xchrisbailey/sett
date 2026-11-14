@@ -506,9 +506,9 @@ impl AppModel {
         title: &str,
         cx: &mut Context<Self>,
     ) -> io::Result<()> {
-        let task = self
-            .store
-            .create_task_in(self.space(), project, column, title, today())?;
+        let task =
+            self.store
+                .create_task_in(self.space(), project, column, title, today(), None)?;
         self.reload(vec![task_change(project, &task.slug)], cx);
         Ok(())
     }
