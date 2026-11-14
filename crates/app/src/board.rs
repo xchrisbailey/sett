@@ -23,9 +23,9 @@ use gpui_kit::{
 use markdown_editor::CalloutKind;
 
 use crate::icons::FILTER_ICON;
-use crate::labels::label_chip;
+use crate::labels::label_badge;
 use sett_store::{
-    Board, BoardColumn, CalloutKind as TaskCalloutKind, Date, Task, TaskCallout, labels_of,
+    Board, BoardColumn, CalloutKind as TaskCalloutKind, Date, Task, TaskCallout, same_label,
 };
 
 use crate::app_model::{AppModel, Selection};
@@ -71,7 +71,7 @@ pub(crate) struct BoardView {
     _picker_events: Subscription,
 }
 
-/// A row of the Label picker: the Label drawn as its chip.
+/// A row of the Label picker: the Label drawn as its badge.
 #[derive(Clone)]
 struct LabelOption(String);
 
@@ -83,7 +83,7 @@ impl SearchableListItem for LabelOption {
     }
 
     fn render(&self, _: &mut Window, _: &mut App) -> impl IntoElement {
-        label_chip(&self.0)
+        label_badge(&self.0)
     }
 
     fn value(&self) -> &String {
@@ -224,20 +224,17 @@ impl BoardView {
     /// edits made in or outside sett. A picked Label that no Task has any more
     /// stays listed, so the filter never silently widens.
     fn refresh_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let model = self.model.read(cx);
-        let tasks = self
+        let mut options = self
             .project
             .as_deref()
-            .map(|p| model.index().tasks(p))
+            .map(|p| self.model.read(cx).project_labels(p))
             .unwrap_or_default();
-        let mut options = labels_of(tasks);
+        // Appended after the sorted Labels, so a vanished pick sits last.
         for picked in &self.picked {
-            let lower = picked.to_lowercase();
-            if !options.iter().any(|o| o.to_lowercase() == lower) {
+            if !options.iter().any(|o| same_label(o, picked)) {
                 options.push(picked.clone());
             }
         }
-        options.sort_by_key(|o| o.to_lowercase());
         self.options = options.clone();
         let items = options.into_iter().map(LabelOption).collect();
         let picked = self.picked.clone();
@@ -258,11 +255,10 @@ impl BoardView {
     fn shows(&self, task: &Task) -> bool {
         self.picked.is_empty()
             || self.added.contains(&task.slug)
-            || task.labels.iter().any(|label| {
-                self.picked
-                    .iter()
-                    .any(|picked| picked.to_lowercase() == label.to_lowercase())
-            })
+            || task
+                .labels
+                .iter()
+                .any(|label| self.picked.iter().any(|picked| same_label(picked, label)))
     }
 
     fn quick_add(
@@ -811,7 +807,7 @@ fn callout_kind(kind: TaskCalloutKind) -> CalloutKind {
     }
 }
 
-/// At most this many Label chips show on a Card; the rest collapse into "+N"
+/// At most this many Label badges show on a Card; the rest collapse into "+N"
 /// so a heavily tagged Task doesn't swamp its title.
 const CARD_LABEL_LIMIT: usize = 3;
 
@@ -825,14 +821,14 @@ fn card_description(callout: Option<String>, labels: &[String]) -> Option<String
     }
 }
 
-/// The wrapping chip row under a Card's title, or `None` for a Task without
+/// The wrapping badge row under a Card's title, or `None` for a Task without
 /// Labels so the Card gets no empty gap.
 fn label_row(slug: &str, labels: &[String], cx: &Context<BoardView>) -> Option<AnyElement> {
     if labels.is_empty() {
         return None;
     }
     let hidden = labels.len().saturating_sub(CARD_LABEL_LIMIT);
-    let chips = labels
+    let badges = labels
         .iter()
         .take(CARD_LABEL_LIMIT)
         .enumerate()
@@ -842,7 +838,7 @@ fn label_row(slug: &str, labels: &[String], cx: &Context<BoardView>) -> Option<A
                 .test_support()
                 .aria_label(label.clone())
                 .min_w_0()
-                .child(label_chip(label))
+                .child(label_badge(label))
         });
     Some(
         h_flex()
@@ -851,7 +847,7 @@ fn label_row(slug: &str, labels: &[String], cx: &Context<BoardView>) -> Option<A
             .flex_wrap()
             .items_center()
             .gap_1()
-            .children(chips)
+            .children(badges)
             .when(hidden > 0, |row| {
                 row.child(
                     div()
@@ -998,13 +994,13 @@ impl BoardView {
                     button.outline().label("Labels")
                 }
             });
-        let chips = self.picked.iter().enumerate().map(|(ix, label)| {
+        let badges = self.picked.iter().enumerate().map(|(ix, label)| {
             let remove = label.clone();
             let accessible = format!("Remove {label} from the filter");
             h_flex()
                 .gap_0p5()
                 .items_center()
-                .child(label_chip(label))
+                .child(label_badge(label))
                 .child(
                     Button::new(ElementId::Name(format!("remove-label-{ix}").into()))
                         .ghost()
@@ -1035,7 +1031,7 @@ impl BoardView {
                     .w(if picked == 0 { rems(9.5) } else { rems(6.5) })
                     .child(picker),
             )
-            .children(chips)
+            .children(badges)
             .when(picked > 0, |row| {
                 row.child(
                     Button::new("clear-label-filter")

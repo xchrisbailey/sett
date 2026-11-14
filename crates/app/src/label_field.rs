@@ -1,5 +1,5 @@
 //! The Task view's Labels field: a multi-select Combobox whose search can also
-//! create a Label, and whose trigger shows the Task's Labels as removable chips.
+//! create a Label, and whose trigger shows the Task's Labels as removable badges.
 
 use gpui_kit::component::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -12,8 +12,9 @@ use gpui_kit::{
     WeakEntity, Window, div,
 };
 
-use crate::labels::label_chip;
+use crate::labels::label_badge;
 use crate::task_view::TaskView;
+use sett_store::same_label;
 
 /// A row of the popup: a Label of the Space, or the row that creates the
 /// Label being typed. Both are valued by the Label's text, so adding through
@@ -66,7 +67,7 @@ pub(crate) fn spelled_like_the_space(typed: &str, space: &[String]) -> String {
     let typed = typed.trim();
     space
         .iter()
-        .find(|l| l.to_lowercase() == typed.to_lowercase())
+        .find(|l| same_label(l, typed))
         .map_or_else(|| typed.to_string(), Clone::clone)
 }
 
@@ -120,7 +121,7 @@ impl SearchableListDelegate for LabelOptions {
             .cloned()
             .map(LabelOption::Existing)
             .collect();
-        let known = self.labels.iter().any(|l| l.to_lowercase() == needle);
+        let known = self.labels.iter().any(|l| same_label(l, &needle));
         if !needle.is_empty() && !known {
             // After partial matches, so Enter takes the best one; "doc" must
             // still be creatable while "docs" exists.
@@ -131,7 +132,7 @@ impl SearchableListDelegate for LabelOptions {
     }
 }
 
-/// The trigger: the Task's Labels as chips with an x each, wrapping onto more
+/// The trigger: the Task's Labels as badges with an x each, wrapping onto more
 /// lines as they grow.
 pub(crate) fn render_trigger(
     trigger: &ComboboxTriggerContext<LabelOptions>,
@@ -168,7 +169,7 @@ pub(crate) fn render_trigger(
                             .ok();
                     }
                 });
-            label_chip(&label).child(remove)
+            label_badge(&label).child(remove)
         }))
         .into_any_element()
 }

@@ -606,6 +606,11 @@ impl AppModel {
         Ok(())
     }
 
+    /// Every Label the Project's Tasks use, sorted ignoring case.
+    pub fn project_labels(&self, project: &str) -> Vec<String> {
+        sett_store::labels_of(self.index.tasks(project))
+    }
+
     /// Every Label the active Space's Tasks use, sorted ignoring case.
     pub fn space_labels(&self) -> Vec<String> {
         sett_store::labels_of(

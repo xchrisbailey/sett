@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::time::SystemTime;
 
 use serde_yaml_ng::{Mapping, Value};
@@ -22,7 +21,7 @@ pub struct Task {
     pub created: Option<Date>,
     pub due: Option<Date>,
     pub done: Option<Date>,
-    /// Free-text tags, already normalised when read; see [`normalize_labels`].
+    /// Free-text Labels, already normalised when read; see [`normalize_labels`].
     pub labels: Vec<String>,
     pub body: String,
     /// When the file was last written, by sett or anyone else. `None` for a
@@ -156,17 +155,23 @@ impl Task {
     }
 }
 
+/// Whether two Labels are the same Label: equal ignoring case, so spellings
+/// never split a Label in two.
+pub fn same_label(a: &str, b: &str) -> bool {
+    a.to_lowercase() == b.to_lowercase()
+}
+
 /// Trims each Label, drops empty ones and later duplicates that match ignoring
 /// case. The first spelling wins and the order is kept, so hand-edited files
 /// and sett agree on what a Task's Labels are.
 pub fn normalize_labels<S: AsRef<str>>(labels: &[S]) -> Vec<String> {
-    let mut seen = HashSet::new();
-    labels
-        .iter()
-        .map(|l| l.as_ref().trim())
-        .filter(|l| !l.is_empty() && seen.insert(l.to_lowercase()))
-        .map(str::to_string)
-        .collect()
+    let mut kept: Vec<String> = Vec::new();
+    for label in labels.iter().map(|l| l.as_ref().trim()) {
+        if !label.is_empty() && !kept.iter().any(|k| same_label(k, label)) {
+            kept.push(label.to_string());
+        }
+    }
+    kept
 }
 
 /// Every Label used by `tasks` (done ones included), once per case-insensitive

@@ -16,7 +16,7 @@ use gpui_kit::{
     InteractiveElement as _, IntoElement, KeyBinding, ParentElement as _, Render, SharedString,
     Styled as _, Subscription, TestSupportExt as _, Window, actions, div,
 };
-use sett_store::{Board, Date, ItemId, Space};
+use sett_store::{Board, Date, ItemId, Space, same_label};
 
 use crate::app_model::AppModel;
 use crate::confirm_delete::{ITEM_CONSEQUENCE, confirm_delete};
@@ -343,7 +343,7 @@ impl TaskView {
         cx: &mut Context<Self>,
     ) {
         let mut labels = self.current_labels();
-        labels.retain(|l| l.to_lowercase() != label.to_lowercase());
+        labels.retain(|l| !same_label(l, label));
         self.set_labels(labels, window, cx);
     }
 
