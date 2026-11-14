@@ -10,7 +10,7 @@ use gpui_kit::{
     px, size,
 };
 use sett::{AppModel, Selection, Shell};
-use sett_store::{Change, Settings};
+use sett_store::{Change, Settings, Space};
 
 mod common;
 use common::click_label;
@@ -270,6 +270,40 @@ fn the_filter_survives_opening_a_task_and_resets_on_a_project_switch(cx: &mut Te
     cx.run_until_parked();
     assert!(has_label(cx, &f, "Filter by Label"));
     assert_eq!(cards(cx, &f, "col-Todo").len(), 3);
+}
+
+#[gpui_kit::test]
+fn the_filter_survives_a_trip_to_the_notes_tab(cx: &mut TestAppContext) {
+    let f = open_board(cx, &SEEDS);
+    toggle(cx, &f, "Filter by Label", 0);
+
+    with_window(cx, &f, |window, cx| click_label(window, None, "Notes", cx));
+    cx.run_until_parked();
+    with_window(cx, &f, |window, cx| click_label(window, None, "Board", cx));
+    cx.run_until_parked();
+
+    assert!(has_label(cx, &f, "Labels, 1 picked"));
+    assert_eq!(cards(cx, &f, "col-Todo"), ["fix-crash"]);
+}
+
+#[gpui_kit::test]
+fn the_filter_resets_on_a_space_switch(cx: &mut TestAppContext) {
+    let f = open_board(cx, &SEEDS);
+    toggle(cx, &f, "Filter by Label", 0);
+    assert_eq!(cards(cx, &f, "col-Todo"), ["fix-crash"]);
+
+    // The Work Space has an Inbox of its own, with the same slug.
+    let root = f.tasks_dir.ancestors().nth(4).unwrap();
+    let work = root.join("work/projects/inbox/tasks");
+    fs::create_dir_all(&work).unwrap();
+    write_task(&work, "work-task", "Todo", 0, "labels: [bug]", None);
+    let model = model(cx, &f);
+    cx.update(|cx| model.update(cx, |w, cx| w.switch_space(Space::Work, cx)));
+    cx.update(|cx| model.update(cx, |w, cx| w.select(Selection::Project("inbox".into()), cx)));
+    cx.run_until_parked();
+
+    assert!(has_label(cx, &f, "Filter by Label"));
+    assert_eq!(cards(cx, &f, "col-Todo"), ["work-task"]);
 }
 
 #[gpui_kit::test]

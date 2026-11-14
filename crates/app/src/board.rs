@@ -25,7 +25,7 @@ use markdown_editor::CalloutKind;
 use crate::icons::FILTER_ICON;
 use crate::labels::label_badge;
 use sett_store::{
-    Board, BoardColumn, CalloutKind as TaskCalloutKind, Date, Task, TaskCallout, same_label,
+    Board, BoardColumn, CalloutKind as TaskCalloutKind, Date, Space, Task, TaskCallout, same_label,
 };
 
 use crate::app_model::{AppModel, Selection};
@@ -50,8 +50,10 @@ pub enum BoardEvent {
 /// quick-add box and its Cards. Cards drag within and between Columns.
 pub(crate) struct BoardView {
     model: Entity<AppModel>,
-    /// The Project shown, by slug. Changing it resets the view state below.
+    /// The Project shown, by slug, and the Space it's in. Changing either
+    /// resets the view state below; two Spaces can both have an `inbox`.
     project: Option<String>,
+    space: Space,
     show_all_done: bool,
     /// The Labels the Board is filtered to, in the order picked. Never saved.
     picked: Vec<String>,
@@ -141,9 +143,11 @@ impl BoardView {
                 cx.notify();
             }
         });
+        let space = model.read(cx).space();
         let mut view = BoardView {
             model,
             project: None,
+            space,
             show_all_done: false,
             picked: Vec::new(),
             added: Vec::new(),
@@ -181,8 +185,10 @@ impl BoardView {
             .into_iter()
             .map(|t| t.slug.clone())
             .collect();
-        if project != self.project {
+        let space = model.space();
+        if project != self.project || space != self.space {
             self.project = project;
+            self.space = space;
             self.show_all_done = false;
             self.picked.clear();
             self.added.clear();
